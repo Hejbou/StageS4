@@ -123,6 +123,11 @@ const PoiDB = (() => {
       type: 'quartier', quartier: 'Ksar', lat: 18.0800, lng: -15.9700,
       aliases: ['centre ville', 'centre-ville', 'centre', 'centreville', 'وسط المدينه', 'وسط المدينة', 'وسط', 'المركز'],
     },
+    {
+      id: 'teyarett', name: 'Teyarett', nameAr: 'تيارت', nameHa: 'تيارت',
+      type: 'quartier', quartier: 'Teyarett', lat: 18.0910, lng: -15.9600,
+      aliases: ['teyarett', 'teyaret', 'tayarett', 'تيارت'],
+    },
 
     // ── MARCHÉS ────────────────────────────────────────────────
     {
@@ -355,6 +360,48 @@ const PoiDB = (() => {
     return result.suggestion || (result.found ? result.canonical : null);
   }
 
+  // ── Lieux de repère proches d'un quartier (hors quartiers eux-mêmes) ─
+  // Utilisé par la localisation intelligente pour proposer des points
+  // de repère (cliniques, mosquées, écoles, stations, commerces...)
+  // quand seul un quartier a été donné. `exclude` évite de reproposer
+  // un lieu déjà suggéré lors d'un tour précédent.
+  // `type` (optionnel) : si l'utilisateur a nommé une catégorie sans
+  // préciser laquelle ("جنب المسجد" = à côté de LA mosquée, sans dire
+  // laquelle), on restreint/oriente les suggestions vers ce type plutôt
+  // que de proposer des types variés au hasard.
+  function nearbyLandmarks(quartierName, opts = {}) {
+    const { exclude = [], limit = 3, type = null } = opts;
+    let pool = quartierName
+      ? POIS.filter(p => p.type !== 'quartier' && p.quartier === quartierName && !exclude.includes(p.id))
+      : [];
+    if (type) pool = pool.filter(p => p.type === type);
+    const result = [...pool];
+
+    if (result.length < limit) {
+      if (type) {
+        // Un type précis a été deviné : mieux vaut élargir à toute la
+        // ville pour ce même type que de changer de sujet.
+        for (const p of POIS) {
+          if (result.length >= limit) break;
+          if (p.type !== type || exclude.includes(p.id) || result.includes(p)) continue;
+          result.push(p);
+        }
+      } else {
+        // Pas de type deviné : compléter avec des repères variés (types
+        // différents) de toute la ville.
+        const seenTypes = new Set(result.map(p => p.type));
+        for (const p of POIS) {
+          if (result.length >= limit) break;
+          if (p.type === 'quartier' || exclude.includes(p.id) || result.includes(p)) continue;
+          if (seenTypes.has(p.type)) continue;
+          result.push(p);
+          seenTypes.add(p.type);
+        }
+      }
+    }
+    return result.slice(0, limit);
+  }
+
   // ── Obtenir un POI par son id ────────────────────────────────
   function getById(id) {
     return POIS.find(p => p.id === id) || null;
@@ -366,6 +413,6 @@ const PoiDB = (() => {
   }
 
   // ── Accès public à la liste complète (pour extensions futures) ─
-  return { search, suggest, getById, getByType, POIS };
+  return { search, suggest, getById, getByType, nearbyLandmarks, POIS };
 
 })();

@@ -17,7 +17,9 @@ const Chat = (() => {
   const STATE = {
     IDLE:                  'IDLE',
     AWAITING_ORIGIN:       'AWAITING_ORIGIN',
+    AWAITING_ORIGIN_PRECISION: 'AWAITING_ORIGIN_PRECISION',
     AWAITING_DEST:         'AWAITING_DEST',
+    AWAITING_DEST_PRECISION: 'AWAITING_DEST_PRECISION',
     AWAITING_PHONE:        'AWAITING_PHONE',
     AWAITING_CONFIRM:      'AWAITING_CONFIRM',
     AWAITING_MODIFY_CHOICE:'AWAITING_MODIFY_CHOICE',
@@ -36,6 +38,13 @@ const Chat = (() => {
   let _modifyingPoint  = null;   // 'origin' | 'dest' | null — used in modify flow
   let _originRetries   = 0;      // retry counter for origin validation
   let _destRetries     = 0;      // retry counter for destination validation
+  let _precisionZone   = null;   // { quartier, label } — vague zone being refined into a precise point
+  let _precisionCount  = 0;      // nombre de questions de précision déjà posées
+  let _precisionMax    = 3;      // borne tirée au début du flux (3 à 5)
+  let _precisionExcluded = [];   // ids des repères déjà proposés (évite les répétitions)
+  let _precisionTarget = null;   // 'origin' | 'dest' — quel point est en cours d'affinage
+  let _autoDest        = null;   // destination extraite en même temps que l'origine dans un même message ("de X à Y") — validée automatiquement une fois l'origine résolue
+  let _lastLang        = 'fr';   // dernière langue détectée dans un message utilisateur (pas la langue de l'interface) — utilisée par les clics sur les cartes (confirmer/annuler), qui n'ont pas de texte à eux-mêmes détecter
   let messages       = [];
   let typingTimer    = null;
   let _currentMode   = 'chat'; // 'chat' | 'call'
@@ -117,7 +126,7 @@ const Chat = (() => {
   };
 
   function _detectIntent(text) {
-    const lang = LangDetect.detect(text);
+    const lang = LangDetect.detect(text, _lastLang);
     // Try current language first, then all others
     const order = [lang, 'fr', 'ar', 'ha'];
     for (const [intent, patterns] of Object.entries(INTENTS)) {
@@ -214,7 +223,7 @@ const Chat = (() => {
     _renderMessage(msg);
     // Speak in call mode
     if (_currentMode === 'call') {
-      Voice.speak(text, LangDetect.detect(text) || I18n.getLang());
+      Voice.speak(text, LangDetect.detect(text, _lastLang) || I18n.getLang());
     }
   }
 
@@ -394,7 +403,11 @@ const Chat = (() => {
     const list = document.getElementById('messages');
     if (!list) return;
     list.addEventListener('click', (e) => {
-      const lang = (typeof I18n !== 'undefined' ? I18n.getLang() : null) || 'fr';
+      // Langue de la conversation détectée (pas le sélecteur FR/AR/HA de
+      // l'en-tête) : un clic sur "Confirmer" après une conversation en
+      // arabe doit répondre en arabe, même si le sélecteur d'interface
+      // est resté sur FR par défaut.
+      const lang = _lastLang || 'fr';
 
       // ── Booking confirmation card ────────────────────────────────
       const confirmBtn = e.target.closest('#inline-confirm-btn');
@@ -433,6 +446,98 @@ const Chat = (() => {
         _aiReply(_t('ai.how.help', lang), lang, 300);
       }
     });
+  }
+
+  // ── Extraction d'un trajet complet depuis une seule phrase libre ─
+  // "Je veux aller de Ksar à Tevragh Zeina", "من الكار إلى الجامعة"...
+  // Évite de forcer l'utilisateur à retaper l'origine puis la destination
+  // séparément quand il les a déjà données dans le même message.
+  // Ne couvre que l'ordre "origine puis destination" (le plus courant) ;
+  // ne remplace pas la validation/précision qui suit (juste l'extraction).
+  // NB: pas de \b devant "à"/"à partir de" — en JS, \b se définit par
+  // rapport aux caractères \w (ASCII), et "à" (accentué) n'en est pas un ;
+  // \b y échoue silencieusement. On utilise (?:^|\s) à la place.
+  const _ROUTE_PATTERNS = {
+    fr: /(?:^|\s)(?:de|depuis|à partir de)\s+(.+?)\s+(?:à|vers|jusqu'à|jusqu’à|pour)\s+(.+)/i,
+    ar: /من\s+(.+?)\s+(?:إلى|الى|إلي|الي|لـ)\s+(.+)/,
+    ha: /من\s+(.+?)\s+(?:لـ|إلى|الى)\s+(.+)/,
+  };
+  // Même chose mais destination annoncée avant l'origine ("à Y depuis X").
+  // Groupes inversés (dest, origin) — voir _extractRoute.
+  const _ROUTE_PATTERNS_REVERSE = {
+    fr: /(?:^|\s)(?:à|vers|jusqu'à|jusqu’à)\s+(.+?)\s+(?:depuis|de)\s+(.+)/i,
+    ar: /(?:إلى|الى|إلي|الي)\s+(.+?)\s+من\s+(.+)/,
+    ha: /(?:إلى|الى|لـ)\s+(.+?)\s+من\s+(.+)/,
+  };
+
+  function _cleanExtracted(text) {
+    return text
+      .replace(/\b(s'il vous pla[iî]t|svp|stp|merci|please)\b/gi, '')
+      .replace(/(من فضلك|رجاء|لو سمحت|عفوا|شكرا)/g, '')
+      .replace(/[?？!.,؟]+$/g, '')
+      .trim();
+  }
+
+  // Retourne { origin, dest } si un trajet complet est reconnu, sinon null.
+  // Essaie d'abord l'ordre "origine puis destination" (le plus courant),
+  // puis l'ordre inversé "destination puis origine".
+  function _extractRoute(text, lang) {
+    const order = [lang, 'fr', 'ar', 'ha'];
+    for (const l of order) {
+      const re = _ROUTE_PATTERNS[l];
+      if (!re) continue;
+      const m = text.match(re);
+      if (m && m[1] && m[2]) {
+        const origin = _cleanExtracted(m[1]);
+        const dest   = _cleanExtracted(m[2]);
+        if (origin && dest) return { origin, dest };
+      }
+    }
+    for (const l of order) {
+      const re = _ROUTE_PATTERNS_REVERSE[l];
+      if (!re) continue;
+      const m = text.match(re);
+      if (m && m[1] && m[2]) {
+        const dest   = _cleanExtracted(m[1]);
+        const origin = _cleanExtracted(m[2]);
+        if (origin && dest) return { origin, dest };
+      }
+    }
+    return null;
+  }
+
+  // ── Provider NLU actif : le moteur à règles ci-dessus (voir nlu.js) ─
+  // Le contrat NLU accepte un `context` (état de la conversation) pour
+  // qu'un futur provider (LLM) puisse l'exploiter ; le provider "rules"
+  // actuel n'en a besoin que pour interpretLocationAnswer (repères déjà
+  // proposés, pour ne jamais reproposer le même) et ignore le reste.
+  if (typeof NLU !== 'undefined') {
+    NLU.registerProvider({
+      detectIntent:          (text, _context) => _detectIntent(text),
+      extractRoute:          (text, lang, _context) => _extractRoute(text, lang),
+      interpretLocationAnswer: (text, lang, _context) => _interpretLocationAnswer(text, lang, _context),
+    });
+  }
+
+  // Contexte de conversation transmis à NLU à chaque appel — permet à un
+  // provider plus riche qu'un moteur à règles (typiquement un LLM) de
+  // savoir ce qui est déjà connu, et donc de ne jamais redemander une
+  // info déjà donnée. Rassemble exactement ce qu'un futur provider LLM
+  // devra recevoir : dernier message, historique, état du trajet en
+  // cours, lieux déjà proposés pendant l'affinage, langue détectée.
+  function _buildNluContext(lang) {
+    return {
+      lang,
+      state,
+      pendingOrigin,
+      pendingDest,
+      lastMessage: messages.length ? messages[messages.length - 1] : null,
+      history: messages.slice(-6),
+      proposedPlaces: _precisionExcluded.map(id => {
+        const p = PoiDB.getById(id);
+        return p ? _poiName(p, lang) : id;
+      }),
+    };
   }
 
   // ── Fuzzy location matching against mock DB (FR + AR) ──────────
@@ -489,7 +594,11 @@ const Chat = (() => {
     if (typeof PoiDB !== 'undefined') {
       const poi = PoiDB.search(raw);
       if (poi.found) {
-        return { found: true, formatted: poi.canonical, lat: poi.lat, lng: poi.lng, suggestion: null, source: 'poi' };
+        return {
+          found: true, formatted: poi.canonical, lat: poi.lat, lng: poi.lng, suggestion: null, source: 'poi',
+          type: poi.poi.type, quartier: poi.poi.quartier,
+          nameAr: poi.poi.nameAr, nameHa: poi.poi.nameHa,
+        };
       }
       // Garder la suggestion POI même si non trouvé pour la proposer plus tard
       if (!raw._poiSuggestion && poi.suggestion) raw._poiSuggestion = poi.suggestion;
@@ -506,8 +615,9 @@ const Chat = (() => {
     try {
       const ctrl = new AbortController();
       const tmo  = setTimeout(() => ctrl.abort(), 3000);
+      // NB: la route Flask attend le paramètre "address", pas "q".
       const r    = await fetch(
-        `http://localhost:5000/api/maps/geocode?q=${encodeURIComponent(raw + ' Nouakchott')}&lang=${lang}`,
+        `http://localhost:5000/api/maps/geocode?address=${encodeURIComponent(raw + ' Nouakchott')}&lang=${lang}`,
         { signal: ctrl.signal }
       );
       clearTimeout(tmo);
@@ -515,6 +625,8 @@ const Chat = (() => {
         const d = await r.json();
         if (d.data && d.data.lat) {
           const name = (d.data.formatted_address || raw).split(',')[0].trim();
+          // Le fallback backend (sans clé Google Maps) ne connaît que les
+          // 18 zones de Nouakchott en entier — jamais un point précis.
           return { found: true, formatted: name, lat: d.data.lat, lng: d.data.lng, suggestion: null, source: 'backend' };
         }
       }
@@ -533,14 +645,287 @@ const Chat = (() => {
       clearTimeout(tmo);
       const items = await r.json();
       if (Array.isArray(items) && items.length > 0) {
-        const name = items[0].display_name.split(',')[0].trim();
-        return { found: true, formatted: name, lat: parseFloat(items[0].lat), lng: parseFloat(items[0].lon), suggestion: null, source: 'nominatim' };
+        const top  = items[0];
+        const name = top.display_name.split(',')[0].trim();
+        return {
+          found: true, formatted: name, lat: parseFloat(top.lat), lng: parseFloat(top.lon), suggestion: null, source: 'nominatim',
+          nomClass: top.class, nomType: top.type,
+        };
       }
     } catch (_) { /* nominatim offline */ }
 
     // ── 4. Non trouvé — suggestion via POI ou heuristique ──────────
     const suggestion = (typeof PoiDB !== 'undefined' ? PoiDB.suggest(raw) : null) || _suggestLocation(raw);
     return { found: false, formatted: raw, suggestion, source: null };
+  }
+
+  // ── Localisation intelligente ────────────────────────────────────
+  // Un "quartier" (ex: Sebkha, Arafat...) ou une entrée générique de la
+  // liste mock est trop large pour situer un client (>1km). On refuse de
+  // le valider comme point de départ et on affine avec des repères
+  // (clinique, mosquée, école, station, commerce) jusqu'à obtenir un
+  // point précis, quitte à poser jusqu'à 3-5 questions courtes.
+  function _isVagueLocation(loc) {
+    if (loc.source === 'poi') return loc.type === 'quartier';
+    if (loc.source === 'mock') return true;
+    // Fallback backend (sans clé Google Maps) : ne résout que les 18 zones
+    // de Nouakchott en entier, jamais un point précis — toujours vague.
+    if (loc.source === 'backend') return true;
+    // Nominatim classe ses résultats : class="place"/"boundary" couvre les
+    // zones administratives (quartier, ville, région...) — vague. Tout le
+    // reste (amenity, shop, tourism, building nommé...) est un point précis.
+    if (loc.source === 'nominatim') return loc.nomClass === 'place' || loc.nomClass === 'boundary';
+    return false;
+  }
+
+  function _poiName(poi, lang) {
+    return (lang === 'ar' ? poi.nameAr : lang === 'ha' ? poi.nameHa : poi.name) || poi.name;
+  }
+
+  function _landmarksList(landmarks, lang) {
+    return landmarks.map(p => `• ${_poiName(p, lang)}`).join('\n');
+  }
+
+  function _nextLandmarks(lang, typeHint) {
+    const quartierKey = _precisionZone ? _precisionZone.quartier : null;
+    const landmarks = PoiDB.nearbyLandmarks(quartierKey, { exclude: _precisionExcluded, limit: 3, type: typeHint || null });
+    landmarks.forEach(p => _precisionExcluded.push(p.id));
+    return landmarks;
+  }
+
+  // ── Compréhension des réponses partielles pendant la précision ──────
+  // "عند العيادة" (à la clinique), "قريب من السوق" (près du marché),
+  // "جنب المسجد" (à côté de la mosquée)... l'utilisateur nomme souvent
+  // une CATÉGORIE ou une relation de proximité plutôt qu'un nom précis.
+  // On isole le nom du repère (en retirant la préposition) pour la
+  // recherche, et si aucun repère précis n'est trouvé mais qu'une
+  // catégorie est reconnaissable, on s'en sert pour orienter la
+  // suggestion suivante au lieu de rester générique.
+  const _RELATIONAL_WORDS = [
+    // AR / HA — les expressions composées d'abord (évite un découpage partiel)
+    'قريب من', 'قرب', 'عند', 'جنب', 'بجانب', 'حداني', 'حدا', 'أمام', 'قدام', 'خلف', 'وراء',
+    // FR
+    "à côté de", 'près de', 'en face de', 'devant', 'derrière', 'chez',
+  ];
+
+  function _stripRelational(text) {
+    let out = text;
+    for (const w of _RELATIONAL_WORDS) out = out.replace(new RegExp(w, 'gi'), ' ');
+    return out.replace(/\s+/g, ' ').trim();
+  }
+
+  // Catégorie de lieu nommée sans précision de l'instance exacte.
+  const _TYPE_HINTS = {
+    hopital:   /عيادة|مستشفى|hôpital|hopital|clinique/i,
+    mosquee:   /مسجد|جامع|mosqu[ée]e?/i,
+    ecole:     /مدرسة|جامعة|[ée]cole|universit[ée]/i,
+    marche:    /سوق|march[ée]/i,
+    station:   /محطة|station[- ]?(service|essence)?/i,
+    carrefour: /كارفور|دوار|carrefour|rond[- ]?point/i,
+    hotel:     /فندق|h[ôo]tel/i,
+    admin:     /بلدية|رئاسة|mairie|préfecture|prefecture/i,
+  };
+
+  function _detectTypeHint(text) {
+    for (const [type, re] of Object.entries(_TYPE_HINTS)) {
+      if (re.test(text)) return type;
+    }
+    return null;
+  }
+
+  // Retourne { poi } si un repère précis a été identifié, { typeHint } si
+  // seule une catégorie a été devinée, ou {} si rien n'a été compris.
+  function _interpretLocationAnswer(text, lang, _context) {
+    const cleaned = _stripRelational(text);
+    const match = PoiDB.search(cleaned);
+    if (match.found && match.poi && match.poi.type !== 'quartier') return { poi: match.poi, cleaned };
+
+    // Repli : le texte brut (au cas où la préposition faisait partie d'un alias).
+    if (cleaned !== text) {
+      const rawMatch = PoiDB.search(text);
+      if (rawMatch.found && rawMatch.poi && rawMatch.poi.type !== 'quartier') return { poi: rawMatch.poi, cleaned: text };
+    }
+
+    return { typeHint: _detectTypeHint(text), cleaned };
+  }
+
+  // target: 'origin' | 'dest' — la même logique d'affinage sert aux deux points.
+  async function _startPrecisionFlow(loc, lang, target) {
+    // Le nom du quartier doit lui aussi s'afficher dans la langue détectée
+    // (loc.formatted est toujours le nom canonique français depuis PoiDB).
+    const zoneLabel = (lang === 'ar' ? loc.nameAr : lang === 'ha' ? loc.nameHa : loc.formatted) || loc.formatted;
+
+    _precisionZone     = { quartier: loc.quartier || null, label: zoneLabel };
+    _precisionCount    = 1;
+    _precisionMax      = 3 + Math.floor(Math.random() * 3); // entre 3 et 5
+    _precisionExcluded = [];
+    _precisionTarget   = target;
+    state = target === 'dest' ? STATE.AWAITING_DEST_PRECISION : STATE.AWAITING_ORIGIN_PRECISION;
+
+    const landmarks = _nextLandmarks(lang);
+    const msg = landmarks.length
+      ? _fill(_t('ai.precision.intro', lang), { zone: zoneLabel, list: _landmarksList(landmarks, lang) })
+      : _fill(_t('ai.precision.intro.nolist', lang), { zone: zoneLabel });
+    await _aiReply(msg, lang, 400);
+  }
+
+  async function _handlePrecisionAnswer(text, lang) {
+    _showTyping();
+    const interpreted = NLU.interpretLocationAnswer(text, lang, _buildNluContext(lang));
+    _hideTyping();
+
+    // Réponse précise : un repère identifié (pas un simple quartier) ─────
+    if (interpreted.poi) {
+      const place = _poiName(interpreted.poi, lang);
+      const confirmMsg = _fill(_t('ai.precision.confirmed', lang), { place });
+      await _aiReply(confirmMsg, lang, 350);
+      await _finalizePrecisePlace(_precisionTarget, place, lang);
+      return;
+    }
+
+    _precisionCount++;
+
+    if (_precisionCount > _precisionMax) {
+      // Limite atteinte : on retient le dernier repère proposé comme
+      // position approximative plutôt que de boucler indéfiniment.
+      const fallbackId = _precisionExcluded[0];
+      const fallback    = fallbackId ? PoiDB.getById(fallbackId) : null;
+      const place = fallback ? _poiName(fallback, lang) : (_precisionZone ? _precisionZone.label : text.trim());
+      const giveupMsg = _fill(_t('ai.precision.giveup', lang), { place });
+      await _aiReply(giveupMsg, lang, 400);
+      await _finalizePrecisePlace(_precisionTarget, place, lang);
+      return;
+    }
+
+    // Une catégorie a été devinée ("مسجد", "hôpital"...) sans lieu précis :
+    // on oriente la prochaine suggestion vers ce type plutôt que de
+    // proposer des types au hasard.
+    const landmarks = _nextLandmarks(lang, interpreted.typeHint);
+    const msg = landmarks.length
+      ? _fill(_t('ai.precision.ask.landmarks', lang), { list: _landmarksList(landmarks, lang) })
+      : _t('ai.precision.not.matched', lang);
+    await _aiReply(msg, lang, 350);
+  }
+
+  function _resetPrecision() {
+    _precisionZone     = null;
+    _precisionCount    = 0;
+    _precisionExcluded = [];
+    _precisionTarget   = null;
+  }
+
+  // Point de sortie commun à l'origine ET la destination, une fois le point
+  // confirmé précis (dès le départ, ou après affinage — d'où target passé
+  // explicitement plutôt que lu depuis _precisionTarget, qui n'est déjà
+  // plus renseigné quand le lieu était précis dès le premier message).
+  // Redirige vers la suite normale du flux (comme avant l'ajout de la
+  // précision), en tenant compte de _modifyingPoint pour le flux de modif.
+  async function _finalizePrecisePlace(target, place, lang) {
+    _resetPrecision();
+
+    if (target === 'dest') {
+      pendingDest = place;
+      if (_modifyingPoint === 'dest') {
+        _modifyingPoint = null;
+        state = STATE.AWAITING_CONFIRM;
+        await _resolveAndShowCard(lang);
+        return;
+      }
+      const authUser = (typeof Auth !== 'undefined') ? Auth.getUser() : null;
+      pendingPhone = authUser ? authUser.phone : null;
+      state = STATE.AWAITING_CONFIRM;
+      await _resolveAndShowCard(lang);
+      return;
+    }
+
+    // target === 'origin'
+    pendingOrigin = place;
+    if (_modifyingPoint === 'origin') {
+      _modifyingPoint = null;
+      state = STATE.AWAITING_CONFIRM;
+      await _resolveAndShowCard(lang);
+      return;
+    }
+    // Une destination avait déjà été donnée dans le même message que
+    // l'origine ("de X à Y") : on la valide directement au lieu de
+    // reposer la question — elle peut elle-même déclencher sa précision.
+    if (_autoDest) {
+      const destText = _autoDest;
+      _autoDest = null;
+      await _handleDestText(destText, lang);
+      return;
+    }
+    state = STATE.AWAITING_DEST;
+    await _aiReply(_t('ai.ask.dest', lang), lang);
+  }
+
+  // ── Traitement du texte d'origine — partagé entre l'état AWAITING_ORIGIN
+  // et l'extraction combinée depuis REQUEST_TRANSPORT ("de X à Y" en un
+  // seul message). Ne suppose pas que `state` vaut déjà AWAITING_ORIGIN.
+  async function _handleOriginText(text, lang) {
+    // Si le texte contient lui-même un trajet complet ("de X à Y"), on
+    // isole l'origine et on mémorise la destination pour plus tard — sauf
+    // en flux de modification (_modifyingPoint), où la destination existe
+    // déjà et ne doit pas être écrasée après coup.
+    const route = NLU.extractRoute(text, lang, _buildNluContext(lang));
+    const originText = route ? route.origin : text;
+    if (route && !_autoDest && !_modifyingPoint) _autoDest = route.dest;
+
+    Maps.hideSuggestions();
+    _showTyping();
+    const locO = await _validateLocation(originText, lang);
+    _hideTyping();
+
+    if (!locO.found && _originRetries < 2) {
+      _originRetries++;
+      const msg = locO.suggestion
+        ? _fill(_t('ai.location.suggest', lang), { place: originText, suggestion: locO.suggestion })
+        : _fill(_t('ai.location.not.found', lang), { place: originText });
+      await _aiReply(msg, lang, 350);
+      return;
+    }
+    _originRetries = 0;
+
+    // ── Localisation intelligente : un simple quartier n'est pas assez précis.
+    // Un texte jamais résolu (même après les 2 relances) n'est pas plus
+    // fiable qu'un quartier vague — on affine dans les deux cas plutôt
+    // que d'accepter tel quel.
+    if (!locO.found || _isVagueLocation(locO)) {
+      const zoneLoc = locO.found ? locO : { found: true, formatted: locO.suggestion || originText, quartier: null };
+      await _startPrecisionFlow(zoneLoc, lang, 'origin');
+      return;
+    }
+
+    await _finalizePrecisePlace('origin', locO.formatted, lang);
+  }
+
+  // ── Traitement du texte de destination — partagé entre l'état
+  // AWAITING_DEST et l'enchaînement automatique depuis _autoDest.
+  async function _handleDestText(text, lang) {
+    Maps.hideSuggestions();
+    _showTyping();
+    const locD = await _validateLocation(text, lang);
+    _hideTyping();
+
+    if (!locD.found && _destRetries < 2) {
+      _destRetries++;
+      const msg = locD.suggestion
+        ? _fill(_t('ai.location.suggest.dest', lang), { place: text, suggestion: locD.suggestion })
+        : _fill(_t('ai.location.not.found.dest', lang), { place: text });
+      await _aiReply(msg, lang, 350);
+      return;
+    }
+    _destRetries = 0;
+
+    // ── Localisation intelligente : idem pour la destination (voir la
+    // même logique côté origine juste au-dessus) ─────────────────────
+    if (!locD.found || _isVagueLocation(locD)) {
+      const zoneLoc = locD.found ? locD : { found: true, formatted: locD.suggestion || text, quartier: null };
+      await _startPrecisionFlow(zoneLoc, lang, 'dest');
+      return;
+    }
+
+    await _finalizePrecisePlace('dest', locD.formatted, lang);
   }
 
   // ── Main processInput — called by Chat UI and Call mode ─────────
@@ -551,8 +936,12 @@ const Chat = (() => {
     _currentMode = options.mode || 'chat';
     _onSpokenCb  = options.onSpoken || null;
 
-    // Detect language from user's text (not UI language)
-    const lang = LangDetect.detect(text);
+    // Detect language from user's text (not UI language). Falls back to
+    // the conversation's last established language when this message has
+    // no real linguistic signal either way (e.g. a bare Latin place name
+    // like "teyarett" mid-Arabic conversation) — see lang-detect.js.
+    const lang = LangDetect.detect(text, _lastLang);
+    _lastLang  = lang;
 
     // Add user message to chat (call mode adds it separately before calling processInput)
     if (_currentMode === 'chat') {
@@ -561,7 +950,7 @@ const Chat = (() => {
       _renderMessage(userMsg);
     }
 
-    const intent = _detectIntent(text);
+    const intent = NLU.detectIntent(text, _buildNluContext(lang));
 
     // Sync voice recognition language to detected language
     if (typeof Voice !== 'undefined') Voice.setActiveLang(lang);
@@ -575,6 +964,8 @@ const Chat = (() => {
         pendingOrigin = null; pendingDest = null; pendingEstimate = null;
         pendingGeoData = null; _modifyingPoint = null; pendingPhone = null;
         _originRetries = 0; _destRetries = 0;
+        _resetPrecision();
+        _autoDest = null;
         state = STATE.IDLE;
       }
       // Fall through to the switch statement (no return here)
@@ -584,62 +975,19 @@ const Chat = (() => {
 
     if (state === STATE.AWAITING_ORIGIN) {
       if (intent === 'CANCEL') { await _handleCancel(lang); return; }
-      Maps.hideSuggestions();
-      _showTyping();
-      const locO = await _validateLocation(text.trim(), lang);
-      _hideTyping();
+      await _handleOriginText(text.trim(), lang);
+      return;
+    }
 
-      if (!locO.found && _originRetries < 2) {
-        _originRetries++;
-        const msg = locO.suggestion
-          ? _fill(_t('ai.location.suggest', lang), { place: text.trim(), suggestion: locO.suggestion })
-          : _fill(_t('ai.location.not.found', lang), { place: text.trim() });
-        await _aiReply(msg, lang, 350);
-        return;
-      }
-      _originRetries = 0;
-      pendingOrigin = locO.found ? locO.formatted : (locO.suggestion || text.trim());
-
-      if (_modifyingPoint === 'origin') {
-        _modifyingPoint = null;
-        state = STATE.AWAITING_CONFIRM;
-        await _resolveAndShowCard(lang);
-        return;
-      }
-      state = STATE.AWAITING_DEST;
-      await _aiReply(_t('ai.ask.dest', lang), lang);
+    if (state === STATE.AWAITING_ORIGIN_PRECISION || state === STATE.AWAITING_DEST_PRECISION) {
+      if (intent === 'CANCEL') { await _handleCancel(lang); return; }
+      await _handlePrecisionAnswer(text.trim(), lang);
       return;
     }
 
     if (state === STATE.AWAITING_DEST) {
       if (intent === 'CANCEL') { await _handleCancel(lang); return; }
-      Maps.hideSuggestions();
-      _showTyping();
-      const locD = await _validateLocation(text.trim(), lang);
-      _hideTyping();
-
-      if (!locD.found && _destRetries < 2) {
-        _destRetries++;
-        const msg = locD.suggestion
-          ? _fill(_t('ai.location.suggest.dest', lang), { place: text.trim(), suggestion: locD.suggestion })
-          : _fill(_t('ai.location.not.found.dest', lang), { place: text.trim() });
-        await _aiReply(msg, lang, 350);
-        return;
-      }
-      _destRetries = 0;
-      pendingDest  = locD.found ? locD.formatted : (locD.suggestion || text.trim());
-
-      if (_modifyingPoint === 'dest') {
-        _modifyingPoint = null;
-        state = STATE.AWAITING_CONFIRM;
-        await _resolveAndShowCard(lang);
-        return;
-      }
-      // Use logged-in user's phone, no prompt needed
-      const authUser = (typeof Auth !== 'undefined') ? Auth.getUser() : null;
-      pendingPhone = authUser ? authUser.phone : null;
-      state = STATE.AWAITING_CONFIRM;
-      await _resolveAndShowCard(lang);
+      await _handleDestText(text.trim(), lang);
       return;
     }
 
@@ -710,8 +1058,17 @@ const Chat = (() => {
           await _aiReply(_t('ai.status.pending', lang), lang);
           break;
         }
-        state = STATE.AWAITING_ORIGIN;
-        await _aiReply(_t('ai.ask.origin', lang), lang);
+        // Le message donne peut-être déjà les deux lieux en une phrase
+        // ("Je veux aller de Ksar à Tevragh Zeina") — on essaie de les
+        // extraire directement au lieu de reposer la question de l'origine.
+        const route = NLU.extractRoute(text, lang, _buildNluContext(lang));
+        if (route) {
+          _autoDest = route.dest;
+          await _handleOriginText(route.origin, lang);
+        } else {
+          state = STATE.AWAITING_ORIGIN;
+          await _aiReply(_t('ai.ask.origin', lang), lang);
+        }
         break;
       }
 
@@ -851,6 +1208,8 @@ const Chat = (() => {
     pendingGeoData  = null;
     _originRetries  = 0;
     _destRetries    = 0;
+    _resetPrecision();
+    _autoDest       = null;
     Maps.hideSuggestions();
     Maps.destroyMap();
     await _aiReply(_t('ai.cancelled', lang), lang, 450);
@@ -1021,7 +1380,7 @@ const Chat = (() => {
     if (inputEl) {
       inputEl.addEventListener('input', () => {
         if (state === STATE.AWAITING_ORIGIN || state === STATE.AWAITING_DEST) {
-          const lang = LangDetect.detect(inputEl.value) || I18n.getLang();
+          const lang = LangDetect.detect(inputEl.value, _lastLang) || I18n.getLang();
           Maps.triggerAutocomplete(inputEl.value, lang);
         } else {
           Maps.hideSuggestions();
@@ -1054,6 +1413,8 @@ const Chat = (() => {
     _modifyingPoint  = null;
     _originRetries   = 0;
     _destRetries     = 0;
+    _resetPrecision();
+    _autoDest        = null;
     if (typeof Voice !== 'undefined') Voice.setActiveLang(null);
     _currentMode    = 'chat';
     _onSpokenCb     = null;

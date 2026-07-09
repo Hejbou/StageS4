@@ -153,6 +153,20 @@ window.LANG_FR = {
   'ai.location.suggest.dest':
     'Je n\'ai pas trouvé la destination "{place}". Voulez-vous dire "{suggestion}" ? Ou précisez le quartier.',
 
+  // ── Localisation intelligente (précision du point de départ) ─────
+  'ai.precision.intro':
+    'Vous êtes dans le secteur de {zone}. Pour vous localiser plus précisément, êtes-vous proche de l\'un de ces lieux ?\n{list}\nOu donnez-moi un autre repère proche (clinique, mosquée, école, station-service, commerce...).',
+  'ai.precision.intro.nolist':
+    'Vous êtes dans le secteur de {zone}. Pour vous localiser plus précisément, quel est le lieu le plus proche de vous (clinique, mosquée, école, station-service, commerce...) ?',
+  'ai.precision.ask.landmarks':
+    'Je n\'ai pas reconnu ce lieu. Êtes-vous proche de l\'un de ceux-ci ?\n{list}\nOu précisez un autre repère proche.',
+  'ai.precision.not.matched':
+    'Je n\'ai pas reconnu ce lieu. Pouvez-vous me donner un autre repère proche (clinique, mosquée, école, station-service, commerce...) ?',
+  'ai.precision.confirmed':
+    'Position précisée : {place}.',
+  'ai.precision.giveup':
+    'Je vais utiliser une position approximative : {place}.',
+
   // ── Téléphone client (identification de la course) ───────────────
   'ai.ask.phone.trip':
     'Parfait ! Quel est votre numéro de téléphone mauritanien (8 chiffres) pour identifier votre demande ?',

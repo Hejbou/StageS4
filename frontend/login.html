@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1E1B4B">
+  <title>ChatIA — Connexion</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/login.css">
+</head>
+<body>
+
+<div class="login-card">
+
+  <!-- Logo -->
+  <div class="login-logo">
+    <div class="login-logo-icon">
+      <svg width="38" height="38" viewBox="0 0 24 24" fill="none">
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 3c-3.31 0-6 2.69-6 6 0 4.5 6 12 6 12s6-7.5 6-12c0-3.31-2.69-6-6-6zm0 8.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z" fill="#fff"/>
+      </svg>
+    </div>
+    <div class="login-app-name">ChatIA</div>
+    <div class="login-app-sub">Assistant Transport IA</div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="auth-tabs">
+    <button class="auth-tab active" id="tab-login"    onclick="switchTab('login')">Connexion</button>
+    <button class="auth-tab"        id="tab-register" onclick="switchTab('register')">Inscription</button>
+  </div>
+
+  <!-- LOGIN FORM -->
+  <form class="auth-form" id="form-login" onsubmit="submitLogin(event)" novalidate>
+    <div class="form-group">
+      <label class="form-label">Téléphone ou identifiant</label>
+      <div class="input-wrap">
+        <input type="text" class="form-input" id="login-phone"
+               placeholder="TEL  ou  votre nom" autocomplete="username">
+      </div>
+      <span class="form-hint">Entrez votre numéro de téléphone ou votre nom d'utilisateur</span>
+      <span class="form-error" id="login-phone-err"></span>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Mot de passe</label>
+      <div class="input-wrap">
+        <input type="password" class="form-input" id="login-password"
+               placeholder="••••••••" autocomplete="current-password">
+        <button type="button" class="input-toggle" onclick="togglePwd('login-password', this)" tabindex="-1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <span class="form-error" id="login-pwd-err"></span>
+    </div>
+
+    <span class="form-error" id="login-global-err"></span>
+
+    <button type="submit" class="auth-submit" id="login-btn">
+      Se connecter
+    </button>
+  </form>
+
+  <!-- REGISTER FORM -->
+  <form class="auth-form hidden" id="form-register" onsubmit="submitRegister(event)" novalidate>
+    <div class="form-group">
+      <label class="form-label">Nom (optionnel)</label>
+      <div class="input-wrap">
+        <input type="text" class="form-input" id="reg-name"
+               placeholder="Votre prénom" autocomplete="name">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Numéro de téléphone</label>
+      <div class="input-wrap with-prefix">
+        <span class="input-prefix">+222 &nbsp;|</span>
+        <input type="tel" class="form-input" id="reg-phone" maxlength="8"
+               inputmode="numeric" placeholder="2X XX XX XX" autocomplete="tel">
+      </div>
+      <span class="form-error" id="reg-phone-err"></span>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Mot de passe</label>
+      <div class="input-wrap">
+        <input type="password" class="form-input" id="reg-password"
+               placeholder="Min. 4 caractères" autocomplete="new-password">
+        <button type="button" class="input-toggle" onclick="togglePwd('reg-password', this)" tabindex="-1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <span class="form-error" id="reg-pwd-err"></span>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Confirmer le mot de passe</label>
+      <div class="input-wrap">
+        <input type="password" class="form-input" id="reg-confirm"
+               placeholder="Répétez le mot de passe" autocomplete="new-password">
+      </div>
+      <span class="form-error" id="reg-confirm-err"></span>
+    </div>
+
+    <span class="form-error" id="reg-global-err"></span>
+
+    <button type="submit" class="auth-submit" id="register-btn">
+      Créer mon compte
+    </button>
+  </form>
+
+</div>
+
+<div class="login-toast" id="login-toast"></div>
+
+<script src="js/auth.js"></script>
+<script>
+  // Redirect if already logged in
+  (function () {
+    var u = Auth.getUser();
+    if (u) window.location.href = u.role === 'admin' ? 'admin.html' : 'index.html';
+  })();
+
+  function switchTab(tab) {
+    document.getElementById('form-login').classList.toggle('hidden', tab !== 'login');
+    document.getElementById('form-register').classList.toggle('hidden', tab !== 'register');
+    document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+    document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+  }
+
+  function togglePwd(inputId, btn) {
+    var inp = document.getElementById(inputId);
+    var show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    btn.innerHTML = show
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  }
+
+  function showToast(msg, type) {
+    var t = document.getElementById('login-toast');
+    t.textContent = msg;
+    t.className = 'login-toast ' + type + ' show';
+    setTimeout(function() { t.classList.remove('show'); }, 3000);
+  }
+
+  function _onlyDigits(e) {
+    var v = e.target.value.replace(/\D/g, '');
+    e.target.value = v;
+  }
+
+  // Only restrict digits on the register phone field
+  document.getElementById('reg-phone').addEventListener('input', _onlyDigits);
+
+  async function submitLogin(e) {
+    e.preventDefault();
+    var identifier = document.getElementById('login-phone').value.trim();
+    var pwd        = document.getElementById('login-password').value;
+    var valid      = true;
+
+    document.getElementById('login-phone-err').textContent   = '';
+    document.getElementById('login-pwd-err').textContent     = '';
+    document.getElementById('login-global-err').textContent  = '';
+
+    if (!identifier) {
+      document.getElementById('login-phone-err').textContent = 'Identifiant requis (téléphone ou nom)';
+      document.getElementById('login-phone').classList.add('error');
+      valid = false;
+    } else {
+      document.getElementById('login-phone').classList.remove('error');
+    }
+
+    if (!pwd) {
+      document.getElementById('login-pwd-err').textContent = 'Mot de passe requis';
+      valid = false;
+    }
+
+    if (!valid) return;
+
+    var btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Connexion...';
+
+    var res = await Auth.loginByIdentifier(identifier, pwd);
+    btn.disabled = false;
+    btn.textContent = 'Se connecter';
+
+    if (!res.ok) {
+      if (res.error === 'account_blocked') {
+        document.getElementById('login-global-err').textContent = '🔒 Ce compte a été bloqué. Contactez l\'administrateur.';
+        document.getElementById('login-global-err').style.color = '#F97316';
+      } else {
+        document.getElementById('login-global-err').textContent = 'Identifiant ou mot de passe incorrect.';
+        document.getElementById('login-global-err').style.color = '';
+      }
+      return;
+    }
+    showToast('Connexion réussie !', 'success');
+    setTimeout(function() {
+      window.location.href = res.user.role === 'admin' ? 'admin.html' : 'index.html';
+    }, 600);
+  }
+
+  async function submitRegister(e) {
+    e.preventDefault();
+    var name    = document.getElementById('reg-name').value.trim();
+    var phone   = document.getElementById('reg-phone').value.trim();
+    var pwd     = document.getElementById('reg-password').value;
+    var confirm = document.getElementById('reg-confirm').value;
+    var valid   = true;
+
+    ['reg-phone-err','reg-pwd-err','reg-confirm-err','reg-global-err']
+      .forEach(function(id) { document.getElementById(id).textContent = ''; });
+
+    if (!Auth.validatePhone(phone)) {
+      document.getElementById('reg-phone-err').textContent = 'Numéro invalide (8 chiffres, commence par 2, 3 ou 4)';
+      valid = false;
+    }
+    if (!Auth.validatePassword(pwd)) {
+      document.getElementById('reg-pwd-err').textContent = 'Mot de passe trop court (min. 4 caractères)';
+      valid = false;
+    }
+    if (pwd && confirm !== pwd) {
+      document.getElementById('reg-confirm-err').textContent = 'Les mots de passe ne correspondent pas';
+      valid = false;
+    }
+    if (!valid) return;
+
+    var btn = document.getElementById('register-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Création...';
+
+    var res = await Auth.register(phone, pwd, name);
+    btn.disabled = false;
+    btn.textContent = 'Créer mon compte';
+
+    if (!res.ok) {
+      if (res.error === 'phone_exists') {
+        document.getElementById('reg-phone-err').textContent = 'Ce numéro est déjà enregistré.';
+      } else {
+        document.getElementById('reg-global-err').textContent = 'Erreur. Réessayez.';
+      }
+      return;
+    }
+    showToast('Compte créé ! Connexion en cours...', 'success');
+    setTimeout(function() { window.location.href = 'index.html'; }, 800);
+  }
+</script>
+</body>
+</html>

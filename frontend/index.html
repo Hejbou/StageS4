@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr" id="html-root">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#FFFFFF">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>ChatIA — Assistant IA</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/chat.css">
+  <link rel="stylesheet" href="css/map-view.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ═══════════════════════════════════════
+       HEADER
+  ═══════════════════════════════════════ -->
+  <header class="app-header" id="app-header">
+    <div class="header-left">
+      <div class="app-logo">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="32" height="32" rx="9" fill="#1C1C1A"/>
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M16 6c-3.31 0-6 2.69-6 6 0 4.5 6 11 6 11s6-6.5 6-11c0-3.31-2.69-6-6-6zm0 8.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4z" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="app-title-group">
+        <span class="app-name">ChatIA</span>
+        <span class="app-subtitle" id="lbl-subtitle">Assistant IA · مساعد ذكي</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="call-btn" id="call-btn" aria-label="Appel IA">
+        <i data-lucide="phone-call"></i>
+        <span id="call-btn-label">Appel IA</span>
+      </button>
+      <div class="lang-switcher" id="lang-switcher">
+        <button class="lang-btn active" data-lang="fr">FR</button>
+        <button class="lang-btn" data-lang="ar">AR</button>
+        <button class="lang-btn" data-lang="ha">HA</button>
+      </div>
+      <button class="icon-btn" id="notif-btn" aria-label="Notifications">
+        <i data-lucide="bell"></i>
+        <span class="notif-badge hidden" id="notif-badge">0</span>
+      </button>
+      <button class="icon-btn" id="settings-btn" aria-label="Paramètres" title="Mon compte" onclick="UserSettings.open()" style="display:none">
+        <i data-lucide="user-circle"></i>
+      </button>
+      <button class="icon-btn" id="logout-btn" aria-label="Déconnexion" title="Déconnexion" style="display:none" onclick="Auth.logout()">
+        <i data-lucide="log-out"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════
+       ACTIVE REQUEST BAR
+  ═══════════════════════════════════════ -->
+  <div id="active-request-bar" class="active-request-bar hidden">
+    <span class="req-status-dot" id="req-dot"></span>
+    <span id="active-req-text">Demande en cours...</span>
+    <button class="req-bar-btn" id="req-bar-btn">Voir</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       MAIN VIEWS
+  ═══════════════════════════════════════ -->
+  <main id="main-content">
+
+    <!-- ── VIEW : CHAT ── -->
+    <div id="view-chat" class="view active">
+      <div class="chat-wrapper">
+        <div class="messages-list" id="messages"></div>
+
+        <div class="typing-indicator hidden" id="typing-indicator">
+          <div class="msg-avatar">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 3c-3.31 0-6 2.69-6 6 0 4.5 6 12 6 12s6-7.5 6-12c0-3.31-2.69-6-6-6zm0 8.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z" fill="#fff"/>
+            </svg>
+          </div>
+          <div class="typing-bubble">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <div class="quick-actions" id="quick-actions">
+          <button class="chip" data-action="request">
+            <i data-lucide="car"></i>
+            <span id="chip-request">Demander transport</span>
+          </button>
+          <button class="chip" data-action="status">
+            <i data-lucide="map-pin"></i>
+            <span id="chip-status">Mon statut</span>
+          </button>
+          <button class="chip" data-action="cancel">
+            <i data-lucide="circle-x"></i>
+            <span id="chip-cancel">Annuler</span>
+          </button>
+          <button class="chip" data-action="help">
+            <i data-lucide="circle-help"></i>
+            <span id="chip-help">Aide</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="suggestions-panel" class="suggestions-panel hidden" role="listbox"></div>
+
+      <div class="chat-input-bar" id="chat-input-bar">
+        <button class="mic-btn" id="mic-btn" aria-label="Microphone">
+          <i data-lucide="mic"></i>
+        </button>
+        <input type="text" id="chat-input" autocomplete="off" autocorrect="off" spellcheck="false"
+               placeholder="Écrivez votre message...">
+        <button class="send-btn" id="send-btn" aria-label="Envoyer">
+          <i data-lucide="send-horizontal"></i>
+        </button>
+      </div>
+
+      <div class="voice-rec-bar hidden" id="voice-rec-bar" data-state="recording">
+        <button class="vrb-cancel-btn" id="vrb-cancel-btn" aria-label="Annuler">
+          <i data-lucide="trash-2"></i>
+        </button>
+        <div class="vrb-center">
+          <div class="vrb-waveform" id="vrb-waveform">
+            <span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <span class="vrb-status" id="vrb-status">Enregistrement...</span>
+          <span class="vrb-timer" id="vrb-timer">00:00</span>
+        </div>
+        <button class="vrb-stop-btn" id="vrb-stop-btn" aria-label="Arrêter">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <rect x="4" y="4" width="16" height="16" rx="3"/>
+          </svg>
+        </button>
+        <button class="vrb-send-btn hidden" id="vrb-send-btn" aria-label="Envoyer vocal">
+          <i data-lucide="send-horizontal"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- ── VIEW : DEMANDES ── -->
+    <div id="view-requests" class="view">
+      <div class="view-scroll-area" id="requests-scroll">
+        <div class="section-title-bar">
+          <h2 class="section-title" id="lbl-requests-title">Mes Demandes</h2>
+        </div>
+        <div id="requests-container"></div>
+      </div>
+    </div>
+
+    <!-- ── VIEW : CARTE ── -->
+    <div id="view-map" class="view">
+      <div class="mv-search-bar">
+        <div class="mv-input-row">
+          <div class="mv-dot origin"></div>
+          <div class="mv-input-wrap">
+            <input type="text" id="mv-origin-input" class="mv-input" autocomplete="off" placeholder="Point de départ...">
+            <span class="mv-input-clear" id="mv-origin-clear">×</span>
+            <div id="mv-origin-suggest" class="mv-suggest-panel hidden"></div>
+          </div>
+        </div>
+        <div class="mv-connector">
+          <div class="mv-connector-line"></div>
+          <button class="mv-swap-btn" id="mv-swap-btn" aria-label="Inverser départ/arrivée">
+            <i data-lucide="arrow-up-down"></i>
+          </button>
+        </div>
+        <div class="mv-input-row">
+          <div class="mv-dot dest"></div>
+          <div class="mv-input-wrap">
+            <input type="text" id="mv-dest-input" class="mv-input" autocomplete="off" placeholder="Destination...">
+            <span class="mv-input-clear" id="mv-dest-clear">×</span>
+            <div id="mv-dest-suggest" class="mv-suggest-panel hidden"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mv-mode-bar">
+        <button class="mv-mode-btn active origin-mode" id="mv-mode-origin">
+          <i data-lucide="map-pin"></i>
+          Départ
+        </button>
+        <button class="mv-mode-btn" id="mv-mode-dest">
+          <i data-lucide="flag"></i>
+          Arrivée
+        </button>
+      </div>
+
+      <div class="mv-map-container">
+        <div id="mv-map"></div>
+        <div class="mv-map-hint" id="mv-map-hint">Appuyez sur la carte pour placer le départ</div>
+      </div>
+
+      <div class="mv-price-panel hidden" id="mv-price-panel">
+        <!-- Prix + pills distance/temps -->
+        <div class="mv-price-top">
+          <div class="mv-price-block">
+            <span class="mv-price-label" id="mv-price-label-text">Prix estimé</span>
+            <span class="mv-price-value" id="mv-price">…</span>
+          </div>
+          <div class="mv-route-pills">
+            <div class="mv-route-badge">
+              <i data-lucide="route"></i>
+              <span id="mv-distance">…</span>
+            </div>
+            <div class="mv-route-badge">
+              <i data-lucide="clock"></i>
+              <span id="mv-duration">…</span>
+            </div>
+          </div>
+        </div>
+        <div class="mv-price-divider"></div>
+        <!-- Boutons actions -->
+        <div class="mv-actions">
+          <button class="mv-book-btn" id="mv-book-btn" disabled>
+            <i data-lucide="car"></i>
+            <span id="mv-book-lbl">Lancer la course</span>
+          </button>
+          <button class="mv-cancel-btn" id="mv-cancel-route-btn" disabled>
+            <i data-lucide="x"></i>
+            <span id="mv-cancel-route-lbl">Annuler</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── VIEW : HISTORIQUE ── -->
+    <div id="view-history" class="view">
+      <div class="view-scroll-area">
+        <div class="section-title-bar">
+          <h2 class="section-title" id="lbl-history-title">Historique</h2>
+          <button class="clear-history-btn" id="clear-history-btn">
+            <i data-lucide="trash-2"></i>
+            <span id="lbl-clear">Effacer</span>
+          </button>
+        </div>
+        <div id="history-container"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ═══════════════════════════════════════
+       BOTTOM NAVIGATION
+  ═══════════════════════════════════════ -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="nav-item active" data-view="chat" id="nav-chat">
+      <div class="nav-icon-wrap">
+        <i data-lucide="message-circle"></i>
+      </div>
+      <span id="nav-lbl-chat">Chat IA</span>
+    </button>
+    <button class="nav-item" data-view="requests" id="nav-requests">
+      <div class="nav-icon-wrap">
+        <i data-lucide="car"></i>
+        <span class="nav-badge hidden" id="nav-req-badge">1</span>
+      </div>
+      <span id="nav-lbl-requests">Demandes</span>
+    </button>
+    <button class="nav-item" data-view="map" id="nav-map">
+      <div class="nav-icon-wrap">
+        <i data-lucide="map"></i>
+      </div>
+      <span id="nav-lbl-map">Carte</span>
+    </button>
+    <button class="nav-item" data-view="history" id="nav-history">
+      <div class="nav-icon-wrap">
+        <i data-lucide="history"></i>
+      </div>
+      <span id="nav-lbl-history">Historique</span>
+    </button>
+  </nav>
+
+  <!-- ═══════════════════════════════════════
+       CALL OVERLAY
+  ═══════════════════════════════════════ -->
+  <div id="call-overlay" class="call-overlay hidden" role="dialog" aria-modal="true">
+    <div class="call-overlay-bg"></div>
+    <div class="call-overlay-content">
+      <div class="call-avatar-ring idle" id="call-avatar">
+        <div class="call-avatar-inner">
+          <svg width="46" height="46" viewBox="0 0 24 24" fill="none">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 3c-3.31 0-6 2.69-6 6 0 4.5 6 12 6 12s6-7.5 6-12c0-3.31-2.69-6-6-6zm0 8.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z" fill="#fff"/>
+          </svg>
+        </div>
+      </div>
+      <div class="call-info">
+        <div class="call-name">ChatIA</div>
+        <div class="call-status-text" id="call-status-text">En attente...</div>
+        <div class="call-duration" id="call-duration">00:00</div>
+      </div>
+      <div class="call-waveform" id="call-waveform">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <div class="call-transcript" id="call-transcript"></div>
+      <button class="end-call-btn" id="end-call-btn" aria-label="Terminer l'appel">
+        <i data-lucide="phone-off"></i>
+        <span id="call-btn-end-label">Terminer</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       VOICE OVERLAY
+  ═══════════════════════════════════════ -->
+  <div id="voice-overlay" class="voice-overlay hidden" role="dialog" aria-modal="true">
+    <div class="voice-content">
+      <div class="voice-rings">
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="ring r3"></div>
+        <div class="voice-mic-center">
+          <i data-lucide="mic"></i>
+        </div>
+      </div>
+      <p class="voice-status-text" id="voice-status">J'écoute...</p>
+      <p class="voice-transcript-text" id="voice-transcript"></p>
+      <div class="voice-waveform" id="voice-waveform">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <button class="voice-cancel-btn" id="voice-cancel-btn">
+        <i data-lucide="x"></i>
+        <span id="lbl-voice-cancel">Annuler</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       NOTIFICATION PANEL
+  ═══════════════════════════════════════ -->
+  <div id="notif-backdrop" class="backdrop hidden"></div>
+  <div id="notif-panel" class="notif-panel hidden" role="dialog" aria-label="Notifications">
+    <div class="notif-panel-header">
+      <div class="notif-title-group">
+        <div class="notif-title-icon">
+          <i data-lucide="bell"></i>
+        </div>
+        <h3 id="lbl-notif-title">Notifications</h3>
+      </div>
+      <div class="notif-header-actions">
+        <button class="clear-notifs-btn" id="clear-notifs-btn">
+          <span id="lbl-mark-read">Tout marquer lu</span>
+        </button>
+        <button class="notif-close-btn" id="notif-close-btn" aria-label="Fermer">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+    <div class="notif-empty hidden" id="notif-empty">
+      <div class="notif-empty-icon">
+        <svg width="52" height="52" viewBox="0 0 80 80" fill="none">
+          <ellipse cx="40" cy="70" rx="22" ry="3.5" fill="#EDE9FE"/>
+          <path d="M28 50C28 36 52 36 52 50L55 63H25L28 50Z" fill="#EDE9FE" stroke="#C4B5FD" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="40" cy="32" r="3" fill="#C4B5FD"/>
+          <path d="M34 63C34 66.3 36.7 69 40 69C43.3 69 46 66.3 46 63" stroke="#C4B5FD" stroke-width="2" fill="none" stroke-linecap="round"/>
+          <circle cx="40" cy="48" r="9" fill="white" stroke="#C4B5FD" stroke-width="1.5"/>
+          <path d="M36 48L39 51L44 44.5" stroke="#6C63FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <p id="lbl-no-notif">Aucune notification</p>
+      <span class="notif-empty-sub" id="lbl-no-notif-sub">Vous êtes à jour</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       MODAL
+  ═══════════════════════════════════════ -->
+  <div id="modal-backdrop" class="backdrop hidden"></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-box" id="modal-box"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       TOAST CONTAINER
+  ═══════════════════════════════════════ -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- ═══════════════════════════════════════
+       USER ACCOUNT PAGE (full-screen)
+  ═══════════════════════════════════════ -->
+  <div id="settings-overlay" class="settings-overlay hidden">
+    <div class="settings-page">
+
+      <!-- Top bar -->
+      <div class="settings-page-topbar">
+        <button class="settings-page-back" onclick="UserSettings.close()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span class="settings-page-topbar-title" id="settings-lbl-title">Mon compte</span>
+      </div>
+
+      <!-- Hero: avatar + name + phone -->
+      <div class="settings-page-hero">
+        <div class="settings-avatar-lg" id="settings-avatar-initials">?</div>
+        <div class="settings-hero-name" id="settings-display-name">—</div>
+        <div class="settings-hero-phone" id="settings-display-phone">—</div>
+      </div>
+
+      <!-- Stats row -->
+      <div class="settings-stats-row">
+        <div class="settings-stat-card">
+          <span class="settings-stat-val" id="settings-trip-count">0</span>
+          <span class="settings-stat-lbl" id="settings-lbl-trips-label">Courses</span>
+        </div>
+        <div class="settings-stat-card">
+          <span class="settings-stat-val" id="settings-since">—</span>
+          <span class="settings-stat-lbl" id="settings-lbl-since-label">Membre depuis</span>
+        </div>
+      </div>
+
+      <!-- Sections -->
+      <div class="settings-page-body">
+
+        <!-- Profil -->
+        <div class="settings-page-section">
+          <div class="settings-page-section-hdr">PROFIL</div>
+          <div class="settings-page-card">
+            <label class="settings-page-field-lbl" id="settings-lbl-edit-name">Modifier le nom</label>
+            <div class="settings-page-input-row">
+              <input type="text" class="settings-page-input" id="settings-name-input" placeholder="Votre prénom">
+              <button class="settings-page-save-btn" id="settings-save-btn" onclick="UserSettings.saveName()">Enregistrer</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sécurité -->
+        <div class="settings-page-section">
+          <div class="settings-page-section-hdr">SÉCURITÉ</div>
+          <div class="settings-page-card">
+            <label class="settings-page-field-lbl">Mot de passe actuel</label>
+            <input type="password" class="settings-page-input" id="settings-old-pwd" placeholder="••••••••" style="margin-bottom:12px">
+            <label class="settings-page-field-lbl">Nouveau mot de passe</label>
+            <input type="password" class="settings-page-input" id="settings-new-pwd" placeholder="Min. 4 caractères" style="margin-bottom:12px">
+            <label class="settings-page-field-lbl">Confirmer le mot de passe</label>
+            <input type="password" class="settings-page-input" id="settings-conf-pwd" placeholder="Répétez le nouveau mot de passe" style="margin-bottom:12px">
+            <span class="settings-page-err" id="settings-pwd-err"></span>
+            <button class="settings-page-save-btn full" onclick="UserSettings.changePassword()">Changer le mot de passe</button>
+          </div>
+        </div>
+
+        <!-- Langue -->
+        <div class="settings-page-section">
+          <div class="settings-page-section-hdr" id="settings-lbl-lang">LANGUE PRÉFÉRÉE</div>
+          <div class="settings-page-card">
+            <div class="settings-lang-row">
+              <button class="settings-lang-btn" data-lang="fr" onclick="UserSettings.setLang('fr')">FR — Français</button>
+              <button class="settings-lang-btn" data-lang="ar" onclick="UserSettings.setLang('ar')">AR — العربية</button>
+              <button class="settings-lang-btn" data-lang="ha" onclick="UserSettings.setLang('ha')">HA — الحسانية</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Logout -->
+      <div class="settings-page-footer">
+        <button class="settings-logout-btn" onclick="Auth.logout()">
+          <i data-lucide="log-out"></i>
+          <span id="settings-lbl-logout">Se déconnecter</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<script src="js/auth.js"></script>
+<script>
+  // Auth guard — redirect to login if not logged in
+  (function () {
+    if (!Auth.isLoggedIn()) { window.location.href = 'login.html'; return; }
+    window.addEventListener('DOMContentLoaded', function () {
+      var logoutBtn   = document.getElementById('logout-btn');
+      var settingsBtn = document.getElementById('settings-btn');
+      if (logoutBtn)   logoutBtn.style.display   = '';
+      if (settingsBtn) settingsBtn.style.display = '';
+    });
+  })();
+</script>
+<script src="translations/fr.js"></script>
+<script src="translations/ar.js"></script>
+<script src="translations/ha.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/lang-detect.js"></script>
+<script src="js/mock-data.js"></script>
+<script src="js/poi-db.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/voice.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="js/maps.js"></script>
+<script src="js/transport.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/call.js"></script>
+<script src="js/map-view.js"></script>
+<script src="js/app.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>lucide.createIcons();</script>
+
+<script>
+/* ── UserSettings ───────────────────────────── */
+const UserSettings = (() => {
+  function open() {
+    const u = Auth.getUser();
+    if (!u) return;
+
+    const initials = (u.name || u.phone || '?').slice(0,1).toUpperCase();
+    document.getElementById('settings-avatar-initials').textContent = initials;
+    document.getElementById('settings-display-name').textContent    = u.name  || '—';
+    document.getElementById('settings-display-phone').textContent   = u.phone ? '+222 ' + u.phone : '—';
+    document.getElementById('settings-name-input').value            = u.name  || '';
+
+    // Clear password fields
+    ['settings-old-pwd','settings-new-pwd','settings-conf-pwd'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    const errEl = document.getElementById('settings-pwd-err');
+    if (errEl) errEl.textContent = '';
+
+    // Language highlight
+    const lang = localStorage.getItem('chatia_lang') || 'fr';
+    document.querySelectorAll('.settings-lang-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.lang === lang);
+    });
+
+    // Member since
+    const since = u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr-FR') : '—';
+    document.getElementById('settings-since').textContent = since;
+
+    // Trip count
+    const trips = JSON.parse(localStorage.getItem('chatia_requests') || '[]');
+    const myTrips = trips.filter(t => t.phone === u.phone || t.clientPhone === u.phone);
+    document.getElementById('settings-trip-count').textContent = myTrips.length;
+
+    const overlay = document.getElementById('settings-overlay');
+    overlay.classList.remove('hidden');
+    setTimeout(() => overlay.classList.add('visible'), 10);
+    if (typeof I18n !== 'undefined') I18n.applyTranslations();
+    lucide.createIcons();
+  }
+
+  function close() {
+    const overlay = document.getElementById('settings-overlay');
+    overlay.classList.remove('visible');
+    setTimeout(() => overlay.classList.add('hidden'), 280);
+  }
+
+  function changePassword() {
+    const oldPwd  = (document.getElementById('settings-old-pwd')  || {}).value || '';
+    const newPwd  = (document.getElementById('settings-new-pwd')  || {}).value || '';
+    const confPwd = (document.getElementById('settings-conf-pwd') || {}).value || '';
+    const errEl   = document.getElementById('settings-pwd-err');
+    if (errEl) errEl.textContent = '';
+
+    const u = Auth.getUser();
+    if (!u) return;
+
+    if (!oldPwd || !newPwd || !confPwd) {
+      if (errEl) errEl.textContent = 'Tous les champs sont requis.';
+      return;
+    }
+    if (newPwd.length < 4) {
+      if (errEl) errEl.textContent = 'Nouveau mot de passe trop court (min. 4 caractères).';
+      return;
+    }
+    if (newPwd !== confPwd) {
+      if (errEl) errEl.textContent = 'Les mots de passe ne correspondent pas.';
+      return;
+    }
+
+    // Verify old password via Auth
+    const loginResult = typeof Auth.verifyPassword === 'function'
+      ? Auth.verifyPassword(u.phone, oldPwd)
+      : true;
+
+    if (!loginResult) {
+      if (errEl) errEl.textContent = 'Mot de passe actuel incorrect.';
+      return;
+    }
+
+    // Update password
+    const users = JSON.parse(localStorage.getItem('chatia_users') || '[]');
+    const idx = users.findIndex(x => x.phone === u.phone);
+    if (idx !== -1) {
+      users[idx].password = newPwd;
+      localStorage.setItem('chatia_users', JSON.stringify(users));
+    }
+
+    ['settings-old-pwd','settings-new-pwd','settings-conf-pwd'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    if (errEl) { errEl.textContent = '✓ Mot de passe mis à jour !'; errEl.style.color = '#10B981'; }
+    setTimeout(() => { if (errEl) { errEl.textContent = ''; errEl.style.color = ''; } }, 3000);
+  }
+
+  function saveName() {
+    const val = document.getElementById('settings-name-input').value.trim();
+    if (!val) return;
+    const u = Auth.getUser();
+    if (!u) return;
+    u.name = val;
+    localStorage.setItem('chatia_session', JSON.stringify(u));
+    // Update display
+    document.getElementById('settings-display-name').textContent    = val;
+    document.getElementById('settings-avatar-initials').textContent = val.slice(0,1).toUpperCase();
+    // Try backend update
+    if (Auth.authFetch) {
+      Auth.authFetch('/api/auth/profile', {
+        method: 'PUT', body: JSON.stringify({ name: val })
+      }).catch(() => {});
+    }
+    // Toast
+    if (typeof App !== 'undefined' && App.showToast) App.showToast('Nom mis à jour !');
+    else alert('Nom mis à jour !');
+  }
+
+  function setLang(lang) {
+    localStorage.setItem('chatia_lang', lang);
+    document.querySelectorAll('.settings-lang-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.lang === lang);
+    });
+    // Apply language change if I18n is available
+    if (typeof I18n !== 'undefined') I18n.setLang(lang);
+    // Update lang switcher buttons
+    document.querySelectorAll('.lang-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.lang === lang);
+    });
+  }
+
+  return { open, close, saveName, setLang, changePassword };
+})();
+</script>
+
+</body>
+</html>

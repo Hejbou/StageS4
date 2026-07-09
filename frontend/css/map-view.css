@@ -1,0 +1,427 @@
+/* ════════════════════════════════════════════
+   ChatIA — Map View CSS
+   ════════════════════════════════════════════ */
+
+/* Ne pas mettre display:flex ici — c'est géré par .view / .view.active */
+#view-map {
+  background: var(--bg, #F8F7FF);
+}
+
+/* ══════════════════════════════════════════════
+   SEARCH BAR
+══════════════════════════════════════════════ */
+.mv-search-bar {
+  background: #FFFFFF;
+  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  box-shadow: 0 3px 16px rgba(28,28,26,.08);
+  z-index: 10;
+  position: relative;
+  flex-shrink: 0;
+  border-bottom: 1.5px solid var(--border, #EDE9FE);
+}
+
+.mv-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+/* ── Origin dot — cercle violet avec centre blanc ── */
+.mv-dot {
+  flex-shrink: 0;
+  position: relative;
+}
+.mv-dot.origin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1C1C1A, #111110);
+  box-shadow: 0 0 0 3.5px rgba(28,28,26,.18), 0 2px 6px rgba(28,28,26,.30);
+}
+.mv-dot.origin::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: white;
+}
+
+/* ── Dest dot — carré arrondi cyan ── */
+.mv-dot.dest {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #1C1C1A, #0891B2);
+  box-shadow: 0 0 0 3.5px rgba(28,28,26,.15), 0 2px 6px rgba(28,28,26,.28);
+}
+.mv-dot.dest::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 5px; height: 5px;
+  border-radius: 1.5px;
+  background: rgba(255,255,255,.9);
+}
+
+/* ── Connecteur pointillé ── */
+.mv-connector {
+  display: flex;
+  align-items: center;
+  padding: 0 0 0 5.5px;
+  height: 12px;
+  position: relative;
+}
+.mv-connector-line {
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: repeating-linear-gradient(
+    to bottom,
+    #A5B4FC 0px, #A5B4FC 3px,
+    transparent 3px, transparent 6px
+  );
+  opacity: .65;
+}
+
+.mv-swap-btn {
+  position: absolute;
+  right: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--surface-2, #F5F3FF);
+  border: 1.5px solid var(--border, #EDE9FE);
+  color: var(--p, #1C1C1A);
+  display: flex; align-items: center; justify-content: center;
+  transition: all .22s cubic-bezier(.34,1.56,.64,1);
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(28,28,26,.12);
+}
+.mv-swap-btn:hover {
+  background: linear-gradient(135deg, #1C1C1A, #111110);
+  color: white;
+  border-color: transparent;
+  transform: translateY(-50%) rotate(180deg);
+  box-shadow: 0 4px 14px rgba(28,28,26,.36);
+}
+.mv-swap-btn:active { transform: translateY(-50%) scale(.88) rotate(180deg); }
+
+/* ── Champs de saisie ── */
+.mv-input-wrap { flex: 1; position: relative; }
+
+.mv-input {
+  width: 100%;
+  height: 44px;
+  background: var(--surface-2, #F5F3FF);
+  border: 1.5px solid var(--border, #EDE9FE);
+  border-radius: 22px;
+  padding: 0 38px 0 16px;
+  font-size: 13.5px;
+  color: var(--text, #111110);
+  font-weight: 500;
+  transition: all .18s ease;
+  box-sizing: border-box;
+}
+.mv-input:focus {
+  border-color: var(--p, #1C1C1A);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(28,28,26,.10);
+  outline: none;
+}
+.mv-input::placeholder { color: #94A3B8; font-weight: 400; }
+
+.mv-input-clear {
+  position: absolute;
+  right: 11px; top: 50%;
+  transform: translateY(-50%);
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--border-2, #DDD6FE);
+  color: var(--text-3, #6B7280);
+  font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.mv-input:not(:placeholder-shown) ~ .mv-input-clear { opacity: 1; }
+
+/* ══════════════════════════════════════════════
+   SUGGESTIONS AUTOCOMPLETE
+══════════════════════════════════════════════ */
+.mv-suggest-panel {
+  position: absolute;
+  top: calc(100% + 5px); left: 0; right: 0;
+  background: white;
+  border: 1px solid var(--border, #EDE9FE);
+  border-radius: 14px;
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 200;
+  box-shadow: 0 8px 28px rgba(28,28,26,.11);
+  scrollbar-width: none;
+}
+.mv-suggest-panel::-webkit-scrollbar { display: none; }
+.mv-suggest-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0,0,0,.04);
+  transition: background .12s ease;
+  user-select: none;
+}
+.mv-suggest-item:last-child { border-bottom: none; }
+.mv-suggest-item:hover,
+.mv-suggest-item:active { background: var(--p-xlight, #F5F3FF); }
+.mv-suggest-item > svg   { flex-shrink: 0; }
+.mv-suggest-main { font-size: 13px; font-weight: 500; color: var(--text, #111110); }
+.mv-suggest-sub  { font-size: 11px; color: #94A3B8; }
+
+/* ══════════════════════════════════════════════
+   BARRE DE MODE
+══════════════════════════════════════════════ */
+.mv-mode-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+  background: white;
+  border-bottom: 1px solid var(--border, #EDE9FE);
+  z-index: 9;
+  flex-shrink: 0;
+}
+.mv-mode-btn {
+  flex: 1;
+  height: 36px;
+  border-radius: 18px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-3, #6B7280);
+  border: 1.5px solid var(--border, #EDE9FE);
+  background: var(--surface-2, #F5F3FF);
+  transition: all .2s cubic-bezier(.34,1.56,.64,1);
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  letter-spacing: .1px;
+}
+.mv-mode-btn svg { width: 13px; height: 13px; }
+
+.mv-mode-btn.active.origin-mode {
+  background: linear-gradient(135deg, #111110 0%, #1C1C1A 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 3px 12px rgba(28,28,26,.38);
+}
+.mv-mode-btn.active.dest-mode {
+  background: linear-gradient(135deg, #0891B2 0%, #1C1C1A 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 3px 12px rgba(28,28,26,.36);
+}
+
+/* ══════════════════════════════════════════════
+   CARTE
+══════════════════════════════════════════════ */
+.mv-map-container {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: var(--p-xlight, #F5F3FF);
+  z-index: 1;
+  position: relative;
+  overflow: hidden;
+}
+#mv-map { position: absolute; inset: 0; }
+
+.mv-map-container .leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
+  font-family: inherit;
+  background: var(--p-xlight, #F5F3FF);
+}
+.mv-map-container .leaflet-control-attribution {
+  font-size: 8px !important;
+  opacity: .45;
+}
+
+.mv-map-hint {
+  position: absolute;
+  bottom: 12px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15,12,40,.84);
+  color: rgba(255,255,255,.95);
+  border-radius: 99px;
+  padding: 7px 18px;
+  font-size: 12px; font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 500;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(28,28,26,.18);
+  transition: opacity .35s ease;
+  letter-spacing: .1px;
+}
+.mv-map-hint.fade-out { opacity: 0; }
+
+/* ══════════════════════════════════════════════
+   PANNEAU PRIX  (compact, proportionné)
+══════════════════════════════════════════════ */
+.mv-price-panel {
+  background: white;
+  border-top: 1.5px solid var(--border, #EDE9FE);
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0));
+  z-index: 10;
+  flex-shrink: 0;
+  box-shadow: 0 -8px 24px rgba(28,28,26,.09);
+  animation: mv-panel-in .25s cubic-bezier(.22,1,.36,1);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@keyframes mv-panel-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Ligne prix + pills */
+.mv-price-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mv-price-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mv-price-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-4, #9CA3AF);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+}
+.mv-price-value {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -1px;
+  line-height: 1;
+  background: linear-gradient(135deg, #111110, #1C1C1A, #A5B4FC);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.mv-route-pills {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.mv-route-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--p-xlight, #F5F3FF);
+  border: 1px solid var(--border-2, #DDD6FE);
+  border-radius: 99px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--p-dark, #111110);
+  white-space: nowrap;
+}
+.mv-route-badge svg { width: 12px; height: 12px; opacity: .8; }
+.mv-route-sep { display: none; }
+
+.mv-price-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border, #EDE9FE), transparent);
+  margin: 0 -2px;
+}
+
+/* Actions */
+.mv-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* Bouton "Lancer la course" — pleine largeur, sobre */
+.mv-book-btn {
+  width: 100%;
+  height: 50px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 800;
+  color: white;
+  background: linear-gradient(135deg, #111110 0%, #111110 45%, #1C1C1A 100%);
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: all .22s cubic-bezier(.34,1.56,.64,1);
+  box-shadow:
+    0 6px 20px rgba(28,28,26,.44),
+    0 2px 4px rgba(0,0,0,.10),
+    inset 0 1px 0 rgba(255,255,255,.12);
+  letter-spacing: .15px;
+  overflow: hidden;
+  position: relative;
+}
+.mv-book-btn::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -70%;
+  width: 40%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent);
+  transform: skewX(-20deg);
+  transition: left .45s ease;
+}
+.mv-book-btn:hover::after { left: 130%; }
+.mv-book-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(28,28,26,.52), 0 3px 6px rgba(0,0,0,.12);
+}
+.mv-book-btn:active {
+  transform: scale(.97);
+  box-shadow: 0 3px 10px rgba(28,28,26,.32);
+}
+.mv-book-btn:disabled {
+  background: linear-gradient(135deg, #C4C9D4, #D1D5DB);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+.mv-book-btn:disabled::after { display: none; }
+
+/* Bouton "Annuler" — discret */
+.mv-cancel-btn {
+  width: 100%;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3, #6B7280);
+  border: 1.5px solid var(--border, #EDE9FE);
+  background: var(--surface-2, #F5F3FF);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: all .18s ease;
+}
+.mv-cancel-btn:hover {
+  background: #FEF2F2;
+  border-color: #FECACA;
+  color: var(--danger, #EF4444);
+}
+.mv-cancel-btn:active  { transform: scale(.97); }
+.mv-cancel-btn:disabled { opacity: .4; cursor: not-allowed; }
+.mv-cancel-btn svg { width: 13px; height: 13px; }
+
+/* ── RTL ── */
+[dir="rtl"] .mv-swap-btn      { right: auto; left: 0; }
+[dir="rtl"] .mv-suggest-panel { text-align: right; }
+[dir="rtl"] .mv-map-hint      { direction: rtl; }
+[dir="rtl"] .mv-route-pills   { flex-direction: row-reverse; }

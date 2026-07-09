@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatIA — Admin</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════
+     SIDEBAR
+═══════════════════════════════════ -->
+<aside class="admin-sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon">
+      <svg width="24" height="24" viewBox="0 0 44 44" fill="none">
+        <rect x="8"    y="17" width="5" height="10" rx="2.5" fill="white" opacity="0.70"/>
+        <rect x="15"   y="14" width="5" height="16" rx="2.5" fill="white" opacity="0.85"/>
+        <rect x="19.5" y="9"  width="5" height="26" rx="2.5" fill="white"/>
+        <rect x="24"   y="14" width="5" height="16" rx="2.5" fill="white" opacity="0.85"/>
+        <rect x="31"   y="17" width="5" height="10" rx="2.5" fill="white" opacity="0.70"/>
+      </svg>
+    </div>
+    <div>
+      <div class="sidebar-app-name">ChatIA</div>
+      <div class="sidebar-role">Admin Panel</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a class="nav-link" id="nav-dashboard" onclick="goSection('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+      <span>Tableau de bord</span>
+    </a>
+
+    <a class="nav-link" id="nav-users" onclick="goSection('users')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+      <span>Utilisateurs</span>
+    </a>
+
+    <a class="nav-link" id="nav-requests" onclick="goSection('requests')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 17H5a3 3 0 0 1-3-3l2-8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2l2 8a3 3 0 0 1-3 3z"/>
+        <circle cx="7.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="17.5" r="2.5"/>
+      </svg>
+      <span>Courses</span>
+    </a>
+
+    <a class="nav-link" id="nav-settings" onclick="goSection('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span>Paramètres IA</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <button class="logout-btn" onclick="adminLogout()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+        <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+      <span>Déconnexion</span>
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════
+     MAIN
+═══════════════════════════════════ -->
+<div class="admin-main">
+
+  <!-- Top bar -->
+  <div class="admin-topbar">
+    <div class="topbar-title" id="topbar-section-title">Tableau de bord</div>
+    <div class="topbar-user">
+      <span id="topbar-name"></span>
+      <div class="topbar-avatar" id="topbar-avatar">A</div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="admin-content">
+
+    <!-- ── DASHBOARD ── -->
+    <div id="section-dashboard" class="section">
+      <h2 class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+        </svg>
+        Tableau de bord
+      </h2>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon purple">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value" id="stat-users">0</div>
+            <div class="stat-label">Utilisateurs</div>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon cyan">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 17H5a3 3 0 0 1-3-3l2-8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2l2 8a3 3 0 0 1-3 3z"/>
+              <circle cx="7.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="17.5" r="2.5"/>
+            </svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value" id="stat-requests">0</div>
+            <div class="stat-label">Courses totales</div>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value" id="stat-pending">0</div>
+            <div class="stat-label">En attente</div>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value" id="stat-accepted">0</div>
+            <div class="stat-label">Acceptées</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent courses -->
+      <div class="table-card">
+        <div class="table-header">
+          <h3>Courses récentes</h3>
+          <button class="btn-sm primary" onclick="goSection('requests')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            Voir tout
+          </button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Départ</th><th>Arrivée</th><th>Statut</th><th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="recent-requests-body">
+            <tr class="empty-row"><td colspan="5">Chargement…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── USERS ── -->
+    <div id="section-users" class="section">
+      <h2 class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        Gestion des utilisateurs
+      </h2>
+
+      <div class="table-card">
+        <div class="table-header">
+          <h3>Tous les utilisateurs</h3>
+          <div class="table-header-right">
+            <input type="text" class="search-input" id="user-search" placeholder="Rechercher…">
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Utilisateur</th><th>Rôle</th><th>Statut</th><th>Inscrit le</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="users-body">
+            <tr class="empty-row"><td colspan="5">Chargement…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── REQUESTS ── -->
+    <div id="section-requests" class="section">
+      <h2 class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 17H5a3 3 0 0 1-3-3l2-8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2l2 8a3 3 0 0 1-3 3z"/>
+          <circle cx="7.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="17.5" r="2.5"/>
+        </svg>
+        Courses & Demandes
+      </h2>
+
+      <div class="table-card">
+        <div class="table-header">
+          <h3>Toutes les courses</h3>
+          <div class="table-header-right">
+            <input type="text" class="search-input" id="req-search" placeholder="Rechercher…">
+            <button class="btn-sm danger" onclick="resetAllData()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              Tout effacer
+            </button>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg);">
+          <button class="btn-sm primary filter-btn active" data-filter="all"       onclick="filterRequests('all')">Tout</button>
+          <button class="btn-sm filter-btn" style="background:#FEF3C7;color:#92400E;" data-filter="pending"  onclick="filterRequests('pending')">En attente</button>
+          <button class="btn-sm filter-btn" style="background:#D1FAE5;color:#065F46;" data-filter="accepted" onclick="filterRequests('accepted')">Acceptées</button>
+          <button class="btn-sm filter-btn" style="background:#FEE2E2;color:#991B1B;" data-filter="cancelled" onclick="filterRequests('cancelled')">Annulées</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Départ</th><th>Arrivée</th><th>Téléphone</th><th>Statut</th><th>Date</th><th></th></tr>
+          </thead>
+          <tbody id="requests-body">
+            <tr class="empty-row"><td colspan="7">Chargement…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ── -->
+    <div id="section-settings" class="section">
+      <h2 class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Paramètres de l'IA
+      </h2>
+
+      <!-- OVERVIEW — Category cards -->
+      <div id="settings-overview" class="settings-overview">
+        <div class="settings-cat-grid">
+
+          <button class="settings-cat-card" onclick="openSettingsPanel('welcome')">
+            <div class="settings-cat-icon" style="background:linear-gradient(135deg,#6C63FF,#A78BFA)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <div class="settings-cat-info">
+              <div class="settings-cat-name">Messages d'accueil</div>
+              <div class="settings-cat-desc">Personnaliser les salutations FR · AR · HA</div>
+            </div>
+            <svg class="settings-cat-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <button class="settings-cat-card" onclick="openSettingsPanel('phrases')">
+            <div class="settings-cat-icon" style="background:linear-gradient(135deg,#0891B2,#22D3EE)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </div>
+            <div class="settings-cat-info">
+              <div class="settings-cat-name">Phrases de l'IA</div>
+              <div class="settings-cat-desc">Modifier et traduire toutes les réponses FR · AR · HA</div>
+            </div>
+            <svg class="settings-cat-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <button class="settings-cat-card" onclick="openSettingsPanel('behavior')">
+            <div class="settings-cat-icon" style="background:linear-gradient(135deg,#059669,#34D399)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </div>
+            <div class="settings-cat-info">
+              <div class="settings-cat-name">Comportement IA</div>
+              <div class="settings-cat-desc">Délai de réponse · tentatives · zone de service</div>
+            </div>
+            <svg class="settings-cat-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <button class="settings-cat-card" onclick="openSettingsPanel('call')">
+            <div class="settings-cat-icon" style="background:linear-gradient(135deg,#DC2626,#F87171)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13 19.79 19.79 0 0 1 1.61 4.42 2 2 0 0 1 3.6 2.23h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.09 6.09l1.26-1.83a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            </div>
+            <div class="settings-cat-info">
+              <div class="settings-cat-name">Appel & Voix IA</div>
+              <div class="settings-cat-desc">Mode appel · synthèse vocale · messages audio</div>
+            </div>
+            <svg class="settings-cat-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <button class="settings-cat-card" onclick="openSettingsPanel('training')">
+            <div class="settings-cat-icon" style="background:linear-gradient(135deg,#7C3AED,#A78BFA)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            </div>
+            <div class="settings-cat-info">
+              <div class="settings-cat-name">Entraînement IA</div>
+              <div class="settings-cat-desc">Verbosité · compréhension · mode réponse · personnalité</div>
+            </div>
+            <svg class="settings-cat-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+        </div>
+      </div>
+
+      <!-- SUB-PANEL — Detail editor -->
+      <div id="settings-sub-panel" class="settings-sub-panel hidden">
+        <div class="sub-panel-header">
+          <button class="sub-panel-back" onclick="closeSettingsPanel()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Retour
+          </button>
+          <div class="sub-panel-title" id="sub-panel-title">Paramètres</div>
+        </div>
+        <div class="sub-panel-body" id="sub-panel-body">
+          <!-- Injected by JS -->
+        </div>
+      </div>
+
+    </div>
+
+  </div><!-- .admin-content -->
+</div><!-- .admin-main -->
+
+<div class="admin-toast" id="admin-toast"></div>
+
+<!-- Custom Confirm Dialog -->
+<div id="admin-confirm-overlay" class="admin-confirm-overlay hidden" onclick="if(event.target===this)adminConfirmCancel()">
+  <div class="admin-confirm-box">
+    <div class="admin-confirm-icon" id="admin-confirm-icon">⚠️</div>
+    <div class="admin-confirm-title" id="admin-confirm-title">Confirmation</div>
+    <p class="admin-confirm-msg" id="admin-confirm-msg"></p>
+    <div class="admin-confirm-btns">
+      <button class="admin-confirm-cancel" onclick="adminConfirmCancel()">Annuler</button>
+      <button class="admin-confirm-ok" id="admin-confirm-ok">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Course Detail Panel -->
+<div id="course-detail-overlay" class="detail-overlay hidden" onclick="if(event.target===this)closeCourseDetail()">
+  <div class="detail-panel" id="course-detail-panel">
+    <div class="detail-panel-header">
+      <button class="detail-close-btn" onclick="closeCourseDetail()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Retour
+      </button>
+      <h3 class="detail-panel-title">Détail de la course</h3>
+    </div>
+    <div class="detail-panel-body" id="course-detail-body"></div>
+  </div>
+</div>
+
+<script src="js/auth.js"></script>
+<script src="js/admin.js"></script>
+</body>
+</html>

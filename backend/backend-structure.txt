@@ -1,0 +1,38 @@
+backend/
+├── run.py                      ← Point d'entrée
+├── requirements.txt            ← Dépendances pip
+├── .env                        ← Configuration (à adapter)
+├── app/
+│   ├── __init__.py             ← Factory Flask
+│   ├── config.py               ← Config MySQL, JWT, pricing
+│   ├── extensions.py           ← db, jwt, cors, bcrypt
+│   ├── models/
+│   │   ├── user.py             ← Clé primaire = téléphone mauritanien
+│   │   ├── driver.py           ← Profil chauffeur
+│   │   ├── location.py         ← 18 zones Nouakchott
+│   │   ├── trip.py             ← Courses + notes
+│   │   ├── chat.py             ← Historique conversations
+│   │   └── notification.py     ← Notifications
+│   ├── routes/
+│   │   ├── auth.py             ← register / login / me / profile
+│   │   ├── trips.py            ← CRUD courses + cancel/accept/rate
+│   │   ├── drivers.py          ← Disponibilité + GPS
+│   │   ├── locations.py        ← Lieux + estimation prix
+│   │   ├── chat.py             ← Sessions + messages
+│   │   └── notifications.py    ← Notifications
+│   └── utils/
+│       ├── phone.py            ← Validation 2|3|4 + 7 chiffres
+│       ├── pricing.py          ← Haversine + MRU (50 + 25/km)
+│       └── responses.py        ← ok() / created() / error()
+├── database/
+│   ├── schema.sql              ← Toutes les tables MySQL
+│   └── seed.sql                ← 18 lieux + 11 utilisateurs test
+└── scripts/
+    └── init_db.py              ← Initialise DB + lieux + admin
+cd backend
+python -m venv venv && venv\Scripts\activate
+pip install -r requirements.txt
+# Mettre DB_PASSWORD dans .env
+mysql -u root -p < database/schema.sql
+python scripts/init_db.py
+python run.py

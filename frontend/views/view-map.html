@@ -1,0 +1,70 @@
+<div class="mv-search-bar">
+  <div class="mv-input-row">
+    <div class="mv-dot origin"></div>
+    <div class="mv-input-wrap">
+      <input type="text" id="mv-origin-input" class="mv-input" autocomplete="off" placeholder="Point de départ...">
+      <span class="mv-input-clear" id="mv-origin-clear">×</span>
+      <div id="mv-origin-suggest" class="mv-suggest-panel hidden"></div>
+    </div>
+  </div>
+  <div class="mv-connector">
+    <div class="mv-connector-line"></div>
+    <button class="mv-swap-btn" id="mv-swap-btn" aria-label="Inverser départ/arrivée">
+      <i data-lucide="arrow-up-down"></i>
+    </button>
+  </div>
+  <div class="mv-input-row">
+    <div class="mv-dot dest"></div>
+    <div class="mv-input-wrap">
+      <input type="text" id="mv-dest-input" class="mv-input" autocomplete="off" placeholder="Destination...">
+      <span class="mv-input-clear" id="mv-dest-clear">×</span>
+      <div id="mv-dest-suggest" class="mv-suggest-panel hidden"></div>
+    </div>
+  </div>
+</div>
+
+<div class="mv-mode-bar">
+  <button class="mv-mode-btn active origin-mode" id="mv-mode-origin">
+    <i data-lucide="map-pin"></i>
+    Départ
+  </button>
+  <button class="mv-mode-btn" id="mv-mode-dest">
+    <i data-lucide="flag"></i>
+    Arrivée
+  </button>
+</div>
+
+<div class="mv-map-container">
+  <div id="mv-map"></div>
+  <div class="mv-map-hint" id="mv-map-hint">Appuyez sur la carte pour placer le départ</div>
+</div>
+
+<div class="mv-price-panel hidden" id="mv-price-panel">
+  <div class="mv-route-summary">
+    <div class="mv-route-badge">
+      <i data-lucide="route"></i>
+      <span id="mv-distance">…</span>
+    </div>
+    <span class="mv-route-sep">·</span>
+    <div class="mv-route-badge">
+      <i data-lucide="clock"></i>
+      <span id="mv-duration">…</span>
+    </div>
+  </div>
+  <div class="mv-price-main-row">
+    <div class="mv-price-block">
+      <span class="mv-price-label" id="mv-price-label-text">Prix estimé</span>
+      <span class="mv-price-value" id="mv-price">…</span>
+    </div>
+    <div class="mv-action-row">
+      <button class="mv-cancel-btn" id="mv-cancel-route-btn" disabled>
+        <i data-lucide="x"></i>
+        <span id="mv-cancel-route-lbl">Annuler</span>
+      </button>
+      <button class="mv-book-btn" id="mv-book-btn" disabled>
+        <i data-lucide="car"></i>
+        <span id="mv-book-lbl">Lancer la course</span>
+      </button>
+    </div>
+  </div>
+</div>

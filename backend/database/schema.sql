@@ -160,3 +160,33 @@ CREATE TABLE IF NOT EXISTS notifications (
     INDEX idx_notif_user   (user_phone),
     INDEX idx_notif_unread (user_phone, is_read)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ───────────────────────────────────────────────────────────────────
+--  LIEUX (POI) — source unique pour le chat IA ET le géocodage backend
+--  Remplace le fichier statique frontend/js/poi-db.js et le
+--  dictionnaire Python _NOUAKCHOTT_ZONES (jusque-là non synchronisés).
+-- ───────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS locations (
+    id          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(150)  NOT NULL COMMENT 'Nom canonique (français)',
+    name_ar     VARCHAR(150)  NULL     COMMENT 'Nom en arabe',
+    name_ha     VARCHAR(150)  NULL     COMMENT 'Nom en hassaniya',
+    type        ENUM('quartier','marche','hopital','mosquee','ecole','carrefour','station','admin','hotel','autre')
+                NOT NULL DEFAULT 'autre',
+    quartier    VARCHAR(100)  NULL     COMMENT 'Quartier parent (regroupement pour les suggestions)',
+    lat         DECIMAL(10,8) NOT NULL,
+    lng         DECIMAL(11,8) NOT NULL,
+    aliases     JSON          NULL     COMMENT 'Tableau de noms alternatifs / populaires (FR+AR+HA)',
+    is_active   BOOLEAN       NOT NULL DEFAULT TRUE,
+    created_by  VARCHAR(8)    NULL     COMMENT 'Téléphone de l''admin qui a créé le lieu',
+    created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    CONSTRAINT fk_location_creator FOREIGN KEY (created_by) REFERENCES users(phone) ON DELETE SET NULL,
+    INDEX idx_location_type     (type),
+    INDEX idx_location_quartier (quartier),
+    INDEX idx_location_active   (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Lieux/points de repère — chat IA (précision de localisation) et géocodage';

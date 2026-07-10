@@ -7,7 +7,7 @@
    State machine:
      IDLE → AWAITING_ORIGIN → AWAITING_DEST
           → AWAITING_CONFIRM → [request created]
-     IDLE → AWAITING_PHONE_CANCEL → AWAITING_CANCEL_CONFIRM
+     IDLE → CANCEL_TRIP (active trip) → AWAITING_CANCEL_CONF
           → [cancelled]
    ════════════════════════════════════════════ */
 
@@ -20,12 +20,11 @@ const Chat = (() => {
     AWAITING_ORIGIN_PRECISION: 'AWAITING_ORIGIN_PRECISION',
     AWAITING_DEST:         'AWAITING_DEST',
     AWAITING_DEST_PRECISION: 'AWAITING_DEST_PRECISION',
-    AWAITING_PHONE:        'AWAITING_PHONE',
+    AWAITING_ORIGIN_MATCH_CONFIRM: 'AWAITING_ORIGIN_MATCH_CONFIRM',
+    AWAITING_DEST_MATCH_CONFIRM:   'AWAITING_DEST_MATCH_CONFIRM',
     AWAITING_CONFIRM:      'AWAITING_CONFIRM',
     AWAITING_MODIFY_CHOICE:'AWAITING_MODIFY_CHOICE',
-    AWAITING_PHONE_CANCEL: 'AWAITING_PHONE_CANCEL',
     AWAITING_CANCEL_CONF:  'AWAITING_CANCEL_CONF',
-    AWAITING_TRIP_ID:      'AWAITING_TRIP_ID',
   };
 
   let state            = STATE.IDLE;
@@ -44,6 +43,7 @@ const Chat = (() => {
   let _precisionExcluded = [];   // ids des repères déjà proposés (évite les répétitions)
   let _precisionTarget = null;   // 'origin' | 'dest' — quel point est en cours d'affinage
   let _autoDest        = null;   // destination extraite en même temps que l'origine dans un même message ("de X à Y") — validée automatiquement une fois l'origine résolue
+  let _matchCandidate  = null;   // { target, place, lang, returnState } — correspondance approximative en attente de confirmation oui/non
   let _lastLang        = 'fr';   // dernière langue détectée dans un message utilisateur (pas la langue de l'interface) — utilisée par les clics sur les cartes (confirmer/annuler), qui n'ont pas de texte à eux-mêmes détecter
   let messages       = [];
   let typingTimer    = null;
@@ -540,27 +540,6 @@ const Chat = (() => {
     };
   }
 
-  // ── Fuzzy location matching against mock DB (FR + AR) ──────────
-  function _matchLocation(text) {
-    const raw  = text.trim();
-    const locs = MockData.LOCATIONS;
-    const low  = raw.toLowerCase();
-    // 1. Exact (case insensitive, also handles Arabic)
-    const exact = locs.find(l => l.toLowerCase() === low || l === raw);
-    if (exact) return exact;
-    // 2. Input contains a known location name
-    const contains = locs.find(l => low.includes(l.toLowerCase()) || raw.includes(l));
-    if (contains) return contains;
-    // 3. Known location name contains the input
-    const within = locs.find(l =>
-      (l.toLowerCase().includes(low) && low.length > 3) ||
-      (l.includes(raw) && raw.length > 2)
-    );
-    if (within) return within;
-    // 4. Accept raw text (allow addresses not in mock DB)
-    return raw;
-  }
-
   // ── Location suggestion from known Nouakchott zones ────────────
   function _suggestLocation(text) {
     const low  = text.toLowerCase().trim();
@@ -598,6 +577,7 @@ const Chat = (() => {
           found: true, formatted: poi.canonical, lat: poi.lat, lng: poi.lng, suggestion: null, source: 'poi',
           type: poi.poi.type, quartier: poi.poi.quartier,
           nameAr: poi.poi.nameAr, nameHa: poi.poi.nameHa,
+          matchType: poi.match, // 'exact' | 'alias' | 'fuzzy' — voir _isApproximateMatch
         };
       }
       // Garder la suggestion POI même si non trouvé pour la proposer plus tard
@@ -678,6 +658,20 @@ const Chat = (() => {
     return false;
   }
 
+  // ── Confirmation obligatoire des correspondances approximatives ─────
+  // Une correspondance n'est "sûre" que si elle vient d'un nom ou alias
+  // EXACT du catalogue. Tout le reste — score flou (trigrammes) sur PoiDB,
+  // ou résolution externe via Nominatim (recherche plein texte, jamais
+  // garantie de correspondre exactement à ce que l'utilisateur a tapé) —
+  // est une supposition qui doit être confirmée avant d'être enregistrée
+  // comme départ ou destination. ('mock'/'backend' passent déjà toujours
+  // par _isVagueLocation ci-dessus, donc n'atteignent jamais ce point.)
+  function _isApproximateMatch(loc) {
+    if (loc.source === 'poi') return loc.matchType === 'fuzzy';
+    if (loc.source === 'nominatim') return true;
+    return false;
+  }
+
   function _poiName(poi, lang) {
     return (lang === 'ar' ? poi.nameAr : lang === 'ha' ? poi.nameHa : poi.name) || poi.name;
   }
@@ -686,9 +680,24 @@ const Chat = (() => {
     return landmarks.map(p => `• ${_poiName(p, lang)}`).join('\n');
   }
 
+  // Recherche de proximité réelle (100-500m) quand on connaît les
+  // coordonnées de la zone en cours d'affinage. Si rien n'est catalogué
+  // dans ce rayon (zone périphérique, ex: Toujounine, loin de tout repère
+  // connu), on ne renvoie jamais une liste vide : repli sur le
+  // regroupement par nom de quartier (élargi à toute la ville si besoin,
+  // comme avant l'ajout de la recherche par proximité).
   function _nextLandmarks(lang, typeHint) {
-    const quartierKey = _precisionZone ? _precisionZone.quartier : null;
-    const landmarks = PoiDB.nearbyLandmarks(quartierKey, { exclude: _precisionExcluded, limit: 3, type: typeHint || null });
+    const hasCoords = _precisionZone
+      && typeof _precisionZone.lat === 'number' && typeof _precisionZone.lng === 'number';
+
+    let landmarks = hasCoords
+      ? PoiDB.nearbyByRadius(_precisionZone.lat, _precisionZone.lng, { exclude: _precisionExcluded, limit: 3, type: typeHint || null })
+      : [];
+
+    if (!landmarks.length) {
+      landmarks = PoiDB.nearbyLandmarks(_precisionZone ? _precisionZone.quartier : null, { exclude: _precisionExcluded, limit: 3, type: typeHint || null });
+    }
+
     landmarks.forEach(p => _precisionExcluded.push(p.id));
     return landmarks;
   }
@@ -738,12 +747,12 @@ const Chat = (() => {
   function _interpretLocationAnswer(text, lang, _context) {
     const cleaned = _stripRelational(text);
     const match = PoiDB.search(cleaned);
-    if (match.found && match.poi && match.poi.type !== 'quartier') return { poi: match.poi, cleaned };
+    if (match.found && match.poi && match.poi.type !== 'quartier') return { poi: match.poi, cleaned, matchType: match.match };
 
     // Repli : le texte brut (au cas où la préposition faisait partie d'un alias).
     if (cleaned !== text) {
       const rawMatch = PoiDB.search(text);
-      if (rawMatch.found && rawMatch.poi && rawMatch.poi.type !== 'quartier') return { poi: rawMatch.poi, cleaned: text };
+      if (rawMatch.found && rawMatch.poi && rawMatch.poi.type !== 'quartier') return { poi: rawMatch.poi, cleaned: text, matchType: rawMatch.match };
     }
 
     return { typeHint: _detectTypeHint(text), cleaned };
@@ -755,7 +764,14 @@ const Chat = (() => {
     // (loc.formatted est toujours le nom canonique français depuis PoiDB).
     const zoneLabel = (lang === 'ar' ? loc.nameAr : lang === 'ha' ? loc.nameHa : loc.formatted) || loc.formatted;
 
-    _precisionZone     = { quartier: loc.quartier || null, label: zoneLabel };
+    // lat/lng présents pour les sources 'poi' | 'backend' | 'nominatim' —
+    // absents pour 'mock' ou un texte jamais résolu ; _nextLandmarks se
+    // rabat alors sur le regroupement par quartier (voir plus haut).
+    _precisionZone     = {
+      quartier: loc.quartier || null, label: zoneLabel,
+      lat: typeof loc.lat === 'number' ? loc.lat : null,
+      lng: typeof loc.lng === 'number' ? loc.lng : null,
+    };
     _precisionCount    = 1;
     _precisionMax      = 3 + Math.floor(Math.random() * 3); // entre 3 et 5
     _precisionExcluded = [];
@@ -769,7 +785,7 @@ const Chat = (() => {
     await _aiReply(msg, lang, 400);
   }
 
-  async function _handlePrecisionAnswer(text, lang) {
+  async function _handlePrecisionAnswer(text, lang, skipMatchConfirm = false) {
     _showTyping();
     const interpreted = NLU.interpretLocationAnswer(text, lang, _buildNluContext(lang));
     _hideTyping();
@@ -777,6 +793,13 @@ const Chat = (() => {
     // Réponse précise : un repère identifié (pas un simple quartier) ─────
     if (interpreted.poi) {
       const place = _poiName(interpreted.poi, lang);
+
+      if (!skipMatchConfirm && interpreted.matchType === 'fuzzy') {
+        const returnState = _precisionTarget === 'dest' ? STATE.AWAITING_DEST_PRECISION : STATE.AWAITING_ORIGIN_PRECISION;
+        await _askMatchConfirm(_precisionTarget, place, lang, returnState);
+        return;
+      }
+
       const confirmMsg = _fill(_t('ai.precision.confirmed', lang), { place });
       await _aiReply(confirmMsg, lang, 350);
       await _finalizePrecisePlace(_precisionTarget, place, lang);
@@ -859,10 +882,71 @@ const Chat = (() => {
     await _aiReply(_t('ai.ask.dest', lang), lang);
   }
 
+  // ── Confirmation obligatoire des correspondances approximatives ─────
+  // Déclenchée quand une correspondance n'est PAS un nom/alias exact du
+  // catalogue (score flou PoiDB, ou résolution Nominatim) : on ne
+  // l'enregistre jamais comme départ/destination sans que l'utilisateur
+  // confirme explicitement — voir _isApproximateMatch.
+  async function _askMatchConfirm(target, place, lang, returnState) {
+    _matchCandidate = { target, place, lang, returnState };
+    state = target === 'dest' ? STATE.AWAITING_DEST_MATCH_CONFIRM : STATE.AWAITING_ORIGIN_MATCH_CONFIRM;
+    await _aiReply(_fill(_t('ai.match.confirm', lang), { place }), lang, 300);
+  }
+
+  async function _handleMatchConfirmAnswer(text, lang, intent) {
+    const candidate = _matchCandidate;
+    _matchCandidate = null;
+    if (!candidate) return; // garde-fou : ne devrait jamais arriver
+
+    const trimmed = text.trim();
+    const isPrecisionReturn = candidate.returnState === STATE.AWAITING_ORIGIN_PRECISION
+      || candidate.returnState === STATE.AWAITING_DEST_PRECISION;
+
+    // Oui -> on enregistre enfin le lieu proposé.
+    if (trimmed === '1' || intent === 'CONFIRM') {
+      if (isPrecisionReturn) {
+        const confirmMsg = _fill(_t('ai.precision.confirmed', lang), { place: candidate.place });
+        await _aiReply(confirmMsg, lang, 300);
+      }
+      await _finalizePrecisePlace(candidate.target, candidate.place, lang);
+      return;
+    }
+
+    // Non -> on ne l'enregistre jamais ; on relance la question adaptée
+    // selon d'où venait la proposition (1ère saisie ou précision en cours).
+    if (trimmed === '2' || intent === 'CANCEL') {
+      state = candidate.returnState;
+      if (isPrecisionReturn) {
+        const landmarks = _nextLandmarks(lang);
+        const msg = landmarks.length
+          ? _fill(_t('ai.precision.ask.landmarks', lang), { list: _landmarksList(landmarks, lang) })
+          : _t('ai.precision.not.matched', lang);
+        await _aiReply(msg, lang, 300);
+      } else {
+        await _aiReply(_t('ai.match.declined', lang), lang, 300);
+      }
+      return;
+    }
+
+    // Ni oui ni non : l'utilisateur a retapé/corrigé le lieu directement —
+    // on retraite ce nouveau texte à sa place plutôt que de rester bloqué.
+    state = candidate.returnState;
+    if (isPrecisionReturn) {
+      await _handlePrecisionAnswer(text, lang);
+    } else if (candidate.target === 'dest') {
+      await _handleDestText(text, lang);
+    } else {
+      await _handleOriginText(text, lang);
+    }
+  }
+
   // ── Traitement du texte d'origine — partagé entre l'état AWAITING_ORIGIN
   // et l'extraction combinée depuis REQUEST_TRANSPORT ("de X à Y" en un
   // seul message). Ne suppose pas que `state` vaut déjà AWAITING_ORIGIN.
-  async function _handleOriginText(text, lang) {
+  // `skipMatchConfirm` : vrai quand le texte vient d'un clic explicite sur
+  // une suggestion d'autocomplétion — un choix délibéré dans une liste
+  // réelle n'est jamais une "supposition" à reconfirmer (voir maps.js).
+  async function _handleOriginText(text, lang, skipMatchConfirm = false) {
     // Si le texte contient lui-même un trajet complet ("de X à Y"), on
     // isole l'origine et on mémorise la destination pour plus tard — sauf
     // en flux de modification (_modifyingPoint), où la destination existe
@@ -896,12 +980,17 @@ const Chat = (() => {
       return;
     }
 
+    if (!skipMatchConfirm && _isApproximateMatch(locO)) {
+      await _askMatchConfirm('origin', locO.formatted, lang, STATE.AWAITING_ORIGIN);
+      return;
+    }
+
     await _finalizePrecisePlace('origin', locO.formatted, lang);
   }
 
   // ── Traitement du texte de destination — partagé entre l'état
   // AWAITING_DEST et l'enchaînement automatique depuis _autoDest.
-  async function _handleDestText(text, lang) {
+  async function _handleDestText(text, lang, skipMatchConfirm = false) {
     Maps.hideSuggestions();
     _showTyping();
     const locD = await _validateLocation(text, lang);
@@ -922,6 +1011,11 @@ const Chat = (() => {
     if (!locD.found || _isVagueLocation(locD)) {
       const zoneLoc = locD.found ? locD : { found: true, formatted: locD.suggestion || text, quartier: null };
       await _startPrecisionFlow(zoneLoc, lang, 'dest');
+      return;
+    }
+
+    if (!skipMatchConfirm && _isApproximateMatch(locD)) {
+      await _askMatchConfirm('dest', locD.formatted, lang, STATE.AWAITING_DEST);
       return;
     }
 
@@ -966,6 +1060,7 @@ const Chat = (() => {
         _originRetries = 0; _destRetries = 0;
         _resetPrecision();
         _autoDest = null;
+        _matchCandidate = null;
         state = STATE.IDLE;
       }
       // Fall through to the switch statement (no return here)
@@ -975,19 +1070,24 @@ const Chat = (() => {
 
     if (state === STATE.AWAITING_ORIGIN) {
       if (intent === 'CANCEL') { await _handleCancel(lang); return; }
-      await _handleOriginText(text.trim(), lang);
+      await _handleOriginText(text.trim(), lang, !!options.explicitSelection);
       return;
     }
 
     if (state === STATE.AWAITING_ORIGIN_PRECISION || state === STATE.AWAITING_DEST_PRECISION) {
       if (intent === 'CANCEL') { await _handleCancel(lang); return; }
-      await _handlePrecisionAnswer(text.trim(), lang);
+      await _handlePrecisionAnswer(text.trim(), lang, !!options.explicitSelection);
+      return;
+    }
+
+    if (state === STATE.AWAITING_ORIGIN_MATCH_CONFIRM || state === STATE.AWAITING_DEST_MATCH_CONFIRM) {
+      await _handleMatchConfirmAnswer(text.trim(), lang, intent);
       return;
     }
 
     if (state === STATE.AWAITING_DEST) {
       if (intent === 'CANCEL') { await _handleCancel(lang); return; }
-      await _handleDestText(text.trim(), lang);
+      await _handleDestText(text.trim(), lang, !!options.explicitSelection);
       return;
     }
 
@@ -1025,11 +1125,6 @@ const Chat = (() => {
       return;
     }
 
-    if (state === STATE.AWAITING_PHONE_CANCEL) {
-      await _handlePhoneLookup(text.trim(), lang);
-      return;
-    }
-
     if (state === STATE.AWAITING_CANCEL_CONF) {
       if (intent === 'CONFIRM') { await _doCancel(lang); return; }
       if (intent === 'CANCEL')  {
@@ -1038,11 +1133,6 @@ const Chat = (() => {
         await _aiReply(_t('ai.how.help', lang), lang, 500);
         return;
       }
-    }
-
-    if (state === STATE.AWAITING_TRIP_ID) {
-      await _handleTripIdLookup(text.trim(), lang);
-      return;
     }
 
     // ── Intent routing from IDLE ──────────────────────────────────
@@ -1215,38 +1305,6 @@ const Chat = (() => {
     await _aiReply(_t('ai.cancelled', lang), lang, 450);
   }
 
-  async function _handlePhoneLookup(phone, lang) {
-    const found = MockData.findRequestsByPhone(phone);
-    if (found.length > 0) {
-      pendingCancel = found[0];
-      state = STATE.AWAITING_CANCEL_CONF;
-      const msg = _fill(_t('ai.phone.found', lang), {
-        from: pendingCancel.origin,
-        to:   pendingCancel.destination,
-      });
-      await _aiReply(msg, lang);
-    } else {
-      // Try treating the input as a trip ID directly
-      state = STATE.AWAITING_TRIP_ID;
-      await _aiReply(_t('ai.phone.not.found', lang), lang);
-    }
-  }
-
-  async function _handleTripIdLookup(tripId, lang) {
-    const all = Transport.getAll();
-    const req = all.find(r => r.id.toLowerCase() === tripId.toLowerCase()
-      && (r.status === 'pending' || r.status === 'accepted'));
-    if (req) {
-      pendingCancel = req;
-      state = STATE.AWAITING_CANCEL_CONF;
-      const msg = _fill(_t('ai.phone.found', lang), { from: req.origin, to: req.destination });
-      await _aiReply(msg, lang);
-    } else {
-      state = STATE.IDLE;
-      await _aiReply(_t('ai.trip.id.not.found', lang), lang);
-    }
-  }
-
   async function _doCancel(lang) {
     if (!pendingCancel) { state = STATE.IDLE; return; }
     Transport.cancelRequest(pendingCancel.id);
@@ -1373,13 +1431,18 @@ const Chat = (() => {
     Maps.initSuggestions((selectedName) => {
       if (inputEl) {
         inputEl.value = '';
-        processInput(selectedName, { mode: 'chat' });
+        // explicitSelection: un choix délibéré dans une vraie liste de
+        // suggestions n'est jamais une "supposition" à reconfirmer.
+        processInput(selectedName, { mode: 'chat', explicitSelection: true });
       }
     });
 
     if (inputEl) {
       inputEl.addEventListener('input', () => {
-        if (state === STATE.AWAITING_ORIGIN || state === STATE.AWAITING_DEST) {
+        // Aussi actif pendant la phase de précision (l'utilisateur y tape
+        // le nom d'un repère) — pas seulement sur la 1ère saisie du lieu.
+        if (state === STATE.AWAITING_ORIGIN || state === STATE.AWAITING_DEST
+            || state === STATE.AWAITING_ORIGIN_PRECISION || state === STATE.AWAITING_DEST_PRECISION) {
           const lang = LangDetect.detect(inputEl.value, _lastLang) || I18n.getLang();
           Maps.triggerAutocomplete(inputEl.value, lang);
         } else {

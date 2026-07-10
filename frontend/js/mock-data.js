@@ -93,19 +93,8 @@ const MockData = (() => {
     },
   ];
 
-  const NOTIFICATION_TEMPLATES = [
-    { type: 'success', icon: '✅', titleKey: 'Driver Found', msgKey: 'Your driver is on the way!' },
-    { type: 'warning', icon: '🕐', titleKey: 'Request Pending', msgKey: 'Searching for a driver...' },
-    { type: 'danger',  icon: '❌', titleKey: 'No Driver', msgKey: 'No driver available right now.' },
-    { type: 'info',    icon: '📍', titleKey: 'Driver Arrived', msgKey: 'Your driver is waiting.' },
-  ];
-
   function getRandomDriver() {
     return DRIVERS[Math.floor(Math.random() * DRIVERS.length)];
-  }
-
-  function getRandomLocation() {
-    return LOCATIONS[Math.floor(Math.random() * LOCATIONS.length)];
   }
 
   // ── Pricing system ─────────────────────────────────────────────
@@ -128,13 +117,6 @@ const MockData = (() => {
       price:    `${price} MRU`,
       priceNum: price,
     };
-  }
-
-  function findRequestsByPhone(phone) {
-    const requests = getRequests();
-    const clean = phone.replace(/\s/g, '');
-    return requests.filter(r => r.phone && r.phone.replace(/\s/g, '') === clean
-      && (r.status === 'pending' || r.status === 'accepted'));
   }
 
   function generateRequestId() {
@@ -177,18 +159,14 @@ const MockData = (() => {
   }
 
   return {
-    DRIVERS,
     LOCATIONS,
     getRandomDriver,
-    getRandomLocation,
     getEstimate,
-    findRequestsByPhone,
     generateRequestId,
     getHistory,
     saveHistory,
     getRequests,
     saveRequests,
     simulateDriverSearch,
-    NOTIFICATION_TEMPLATES,
   };
 })();

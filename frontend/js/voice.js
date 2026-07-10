@@ -419,7 +419,6 @@ const Voice = (() => {
     speak,
     stopSpeaking,
     setActiveLang,
-    isListening:  () => isListening,
     isRecording:  () => _isRecording,
   };
 })();

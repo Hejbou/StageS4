@@ -51,23 +51,5 @@ const LangDetect = (() => {
     return 'fr';
   }
 
-  /**
-   * Get translated string directly by language code,
-   * bypassing the UI language set in I18n.
-   * Falls back to French if key not found.
-   */
-  function tLang(key, lang) {
-    const sources = {
-      fr: window.LANG_FR || {},
-      ar: window.LANG_AR || {},
-      ha: window.LANG_HA || {},
-    };
-    const primary  = sources[lang]   || {};
-    const fallback = sources['fr']   || {};
-    return primary[key] !== undefined ? primary[key]
-         : fallback[key] !== undefined ? fallback[key]
-         : key;
-  }
-
-  return { detect, tLang };
+  return { detect };
 })();

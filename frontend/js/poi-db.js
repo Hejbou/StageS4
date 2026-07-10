@@ -1,14 +1,20 @@
 /* ════════════════════════════════════════════
-   poi-db.js — Base de données locale des lieux mauritaniens (Nouakchott)
-   Points d'intérêt réels avec noms populaires, aliases et coordonnées GPS.
+   poi-db.js — Lieux du chat IA (Nouakchott)
 
-   Architecture extensible :
-     • POIS[]  — tableau de points d'intérêt, éditable sans toucher à la logique
-     • search(text) — normalise + cherche : exact → alias → partiel → suggestion
-     • Future : remplacer par GET /api/pois/search?q=... (même contrat)
+   Source des données : GET /api/locations/ (table `locations`, gérée
+   depuis le dashboard admin) — POIS[] ci-dessous n'est qu'un repli
+   statique utilisé le temps que la requête réponde, ou si le backend
+   est injoignable (hors-ligne). Dès que le fetch aboutit, son contenu
+   est remplacé en place par les lieux de la base — ajouter un lieu
+   depuis l'admin le rend donc utilisable par le chat sans toucher au
+   code, dès le prochain chargement de page.
+
+   search() / nearbyLandmarks() / nearbyByRadius() n'ont aucune idée
+   d'où viennent les données : même contrat, que POIS contienne le
+   repli statique ou les lieux chargés depuis l'API.
 
    Chaque POI :
-     id        — identifiant unique (slug)
+     id        — identifiant unique (slug en repli statique, entier en base)
      name      — nom canonique français (affiché à l'utilisateur)
      nameAr    — nom arabe officiel
      nameHa    — nom en hassania (dialecte mauritanien)
@@ -360,6 +366,44 @@ const PoiDB = (() => {
     return result.suggestion || (result.found ? result.canonical : null);
   }
 
+  function _localName(poi, lang) {
+    return (lang === 'ar' ? poi.nameAr : lang === 'ha' ? poi.nameHa : poi.name) || poi.name;
+  }
+
+  // ── Toutes les correspondances, façon moteur de recherche ────────
+  // Contrairement à search() (qui ne renvoie que LE meilleur candidat,
+  // pour la résolution d'un lieu), searchAll() liste tous les lieux dont
+  // le nom/alias (FR/AR/HA) correspond aux caractères saisis, pour
+  // l'autocomplétion pendant la frappe. Résultat prêt à afficher :
+  // { name, secondary_text, lat, lng } (même forme que l'autocomplete
+  // backend, voir maps.js/_renderSuggestions).
+  function searchAll(text, lang = 'fr', limit = 8) {
+    if (!text || !text.trim()) return [];
+    const q = _norm(text);
+    if (!q) return [];
+
+    const scored = [];
+    for (const poi of POIS) {
+      if (poi.type === 'quartier' && !poi.quartier) continue; // repère mal formé, ignorer
+      const candidates = [poi.name, poi.nameAr, poi.nameHa, ...(poi.aliases || [])].map(_norm);
+      let top = 0;
+      for (const c of candidates) {
+        if (!c) continue;
+        if (c === q) { top = 1; break; }
+        if (c.includes(q) || q.includes(c)) { top = Math.max(top, 0.9); continue; }
+        top = Math.max(top, _score(q, c));
+      }
+      if (top >= 0.3) scored.push({ poi, score: top });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit).map(({ poi }) => ({
+      name: _localName(poi, lang),
+      secondary_text: poi.quartier || '',
+      lat: poi.lat, lng: poi.lng,
+    }));
+  }
+
   // ── Lieux de repère proches d'un quartier (hors quartiers eux-mêmes) ─
   // Utilisé par la localisation intelligente pour proposer des points
   // de repère (cliniques, mosquées, écoles, stations, commerces...)
@@ -412,7 +456,77 @@ const PoiDB = (() => {
     return POIS.filter(p => p.type === type);
   }
 
+  // ── Distance à vol d'oiseau en mètres (Haversine) ─────────────
+  function _haversineM(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = d => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(a));
+  }
+
+  // ── Recherche de proximité — repères réels dans un rayon donné ───
+  // Contrairement à nearbyLandmarks (qui regroupe par le champ texte
+  // "quartier"), ceci calcule la vraie distance GPS. Sans rayon explicite,
+  // élargit progressivement 200m → 350m → 500m jusqu'à `limit` résultats
+  // (couvre la fourchette 100-500m demandée pour la phase de précision).
+  function nearbyByRadius(lat, lng, opts = {}) {
+    const { exclude = [], limit = 3, type = null, radiusM = null } = opts;
+    if (typeof lat !== 'number' || typeof lng !== 'number') return [];
+
+    const pool = POIS.filter(p =>
+      p.type !== 'quartier' &&
+      !exclude.includes(p.id) &&
+      (!type || p.type === type) &&
+      typeof p.lat === 'number' && typeof p.lng === 'number'
+    );
+
+    function within(radius) {
+      return pool
+        .map(p => ({ p, d: _haversineM(lat, lng, p.lat, p.lng) }))
+        .filter(x => x.d <= radius)
+        .sort((a, b) => a.d - b.d);
+    }
+
+    let found = radiusM ? within(radiusM) : [];
+    if (!radiusM) {
+      for (const r of [200, 350, 500]) {
+        found = within(r);
+        if (found.length >= limit) break;
+      }
+    }
+    return found.slice(0, limit).map(x => x.p);
+  }
+
+  // ── Chargement depuis l'API (lieux gérés depuis le dashboard admin) ─
+  // Remplace le contenu de POIS EN PLACE (même référence de tableau, pour
+  // que tout code ayant déjà lu PoiDB.POIS voie la mise à jour) dès que
+  // le fetch aboutit. En cas d'échec (backend hors ligne, réseau...), le
+  // repli statique déjà présent dans POIS reste utilisé tel quel.
+  async function _loadFromApi() {
+    try {
+      const ctrl = new AbortController();
+      const tmo  = setTimeout(() => ctrl.abort(), 4000);
+      const r    = await fetch('/api/locations/', { signal: ctrl.signal });
+      clearTimeout(tmo);
+      if (!r.ok) return;
+      const body = await r.json();
+      const fetched = Array.isArray(body.data) ? body.data : [];
+      if (!fetched.length) return;
+      POIS.length = 0;
+      fetched.forEach(loc => POIS.push({
+        id: loc.id, name: loc.name, nameAr: loc.nameAr, nameHa: loc.nameHa,
+        type: loc.type, quartier: loc.quartier,
+        lat: Number(loc.lat), lng: Number(loc.lng),
+        aliases: loc.aliases || [],
+      }));
+    } catch (_) { /* backend hors ligne — on garde le repli statique */ }
+  }
+  _loadFromApi();
+
   // ── Accès public à la liste complète (pour extensions futures) ─
-  return { search, suggest, getById, getByType, nearbyLandmarks, POIS };
+  return { search, suggest, searchAll, getById, getByType, nearbyLandmarks, nearbyByRadius, POIS };
 
 })();

@@ -133,12 +133,27 @@ const Maps = (() => {
     });
   }
 
+  let _acToken = 0; // ignore une réponse backend arrivée après une saisie plus récente
+
   function triggerAutocomplete(query, lang = 'fr') {
     clearTimeout(_debounce);
-    if (!query || query.trim().length < 2) { hideSuggestions(); return; }
+    const q = query.trim();
+    if (!q || q.length < 2) { hideSuggestions(); return; }
+
+    const token = ++_acToken;
+
+    // Résultats locaux INSTANTANÉS (PoiDB déjà en mémoire, 0 aller-retour
+    // réseau) pendant que le backend répond -- évite un panneau vide ou en
+    // retard le temps du round-trip, tout en cherchant sur noms/alias/FR/AR/HA.
+    if (typeof PoiDB !== 'undefined') {
+      const local = PoiDB.searchAll(q, lang);
+      if (local.length) _renderSuggestions(local);
+    }
+
     _debounce = setTimeout(async () => {
-      const results = await autocomplete(query.trim(), lang);
-      _renderSuggestions(results);
+      const results = await autocomplete(q, lang);
+      if (token !== _acToken) return; // une saisie plus récente a eu lieu entre-temps
+      if (results.length) _renderSuggestions(results);
     }, 280);
   }
 

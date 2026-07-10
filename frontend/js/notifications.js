@@ -243,32 +243,5 @@ const Modal = (() => {
     document.getElementById('modal-backdrop').onclick = close;
   }
 
-  function showRequestConfirm(origin, destination, estimate, onConfirm, onCancel) {
-    const lang = I18n.getLang();
-    const labels = {
-      fr: { from: 'Départ', to: 'Destination', dist: 'Distance', time: 'Durée', price: 'Prix estimé' },
-      ar: { from: 'من', to: 'إلى', dist: 'مسافة', time: 'مدة', price: 'السعر التقديري' },
-      ha: { from: 'من', to: 'لـ', dist: 'مسافة', time: 'وقت', price: 'السعر' },
-    }[lang] || { from: 'Départ', to: 'Destination', dist: 'Distance', time: 'Durée', price: 'Prix' };
-
-    show({
-      title: I18n.t('modal.confirm.title'),
-      body: `
-        <div class="confirm-details">
-          <div class="confirm-row"><span class="confirm-label">${labels.from}</span><span class="confirm-value">${origin}</span></div>
-          <div class="confirm-row"><span class="confirm-label">${labels.to}</span><span class="confirm-value">${destination}</span></div>
-          <div class="confirm-row"><span class="confirm-label">${labels.dist}</span><span class="confirm-value">${estimate.distance}</span></div>
-          <div class="confirm-row"><span class="confirm-label">${labels.time}</span><span class="confirm-value">${estimate.time}</span></div>
-          <div class="confirm-row"><span class="confirm-label">${labels.price}</span><span class="confirm-value" style="color:var(--primary);font-size:16px;">${estimate.price}</span></div>
-        </div>`,
-      actions: `
-        <button class="modal-btn secondary" onclick="Modal._onCancel()">${I18n.t('modal.keep').replace('Garder', 'Annuler').replace('احتفاظ', 'إلغاء').replace('خلي', 'إلغاء')}</button>
-        <button class="modal-btn primary" onclick="Modal._onConfirm()">${I18n.t('modal.confirm.btn')}</button>`,
-    });
-    Modal._onConfirm = () => { close(); if (onConfirm) onConfirm(); };
-    Modal._onCancel  = () => { close(); if (onCancel)  onCancel(); };
-    document.getElementById('modal-backdrop').onclick = () => { close(); if (onCancel) onCancel(); };
-  }
-
-  return { show, close, confirm, showRequestConfirm, _onConfirm: null, _onCancel: null };
+  return { show, close, confirm, _onConfirm: null, _onCancel: null };
 })();

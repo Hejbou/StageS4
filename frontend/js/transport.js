@@ -428,25 +428,12 @@ const Transport = (() => {
     _updateNavBadge();
   }
 
-  function refresh() {
-    _renderRequests();
-    _updateActiveBar();
-    _updateNavBadge();
-  }
-
-  function findByPhone(phone) {
-    return MockData.findRequestsByPhone(phone);
-  }
-
   return {
     init,
-    refresh,
     createRequest,
     cancelRequest,
     getActive,
     getAll,
-    findByPhone,
-    STATUS,
     renderRequests: _renderRequests,
   };
 })();

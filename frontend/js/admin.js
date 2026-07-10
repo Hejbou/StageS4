@@ -17,14 +17,17 @@
     $$('.section').forEach(s => s.classList.remove('active'));
     $$('.nav-link').forEach(n => n.classList.remove('active'));
     const sec = $('section-' + id);
-    const lnk = $('nav-' + id);
+    // La page dédiée "Ajouter/Modifier un lieu" n'a pas son propre lien de
+    // navigation : elle garde "Lieux" actif dans la sidebar.
+    const lnk = $('nav-' + (id === 'location-form' ? 'locations' : id));
     if (sec) sec.classList.add('active');
     if (lnk) lnk.classList.add('active');
-    document.title = 'ChatIA Admin — ' + (id.charAt(0).toUpperCase() + id.slice(1));
-    if (id === 'dashboard') renderDashboard();
-    if (id === 'users')     renderUsers();   // async, fire-and-forget
-    if (id === 'requests')  renderRequests();
-    if (id === 'settings')  renderSettings();
+    document.title = 'ChatIA Admin — ' + (id === 'location-form' ? 'Lieux' : id.charAt(0).toUpperCase() + id.slice(1));
+    if (id === 'dashboard')  renderDashboard();
+    if (id === 'users')      renderUsers();   // async, fire-and-forget
+    if (id === 'requests')   renderRequests();
+    if (id === 'settings')   renderSettings();
+    if (id === 'locations')  renderLocations(); // async, fire-and-forget
   }
 
   window.goSection = showSection;
@@ -388,6 +391,281 @@
     showCourseDetail(id);
   };
 
+  // ── LIEUX (POI) ───────────────────────────────────────────────────
+  const _LOCATION_TYPE_LABELS = {
+    quartier: 'Quartier', marche: 'Marché', hopital: 'Hôpital', mosquee: 'Mosquée',
+    ecole: 'École', carrefour: 'Carrefour', station: 'Station', admin: 'Administration',
+    hotel: 'Hôtel', autre: 'Autre',
+  };
+
+  let _locSearch  = '';
+  let _allLocations = [];
+  let _locMap    = null;
+  let _locMarker = null;
+  const _NKC_CENTER = [18.0735, -15.9582];
+
+  function _initLocMap(lat, lng) {
+    if (typeof L === 'undefined') return;
+    const center = (typeof lat === 'number' && typeof lng === 'number') ? [lat, lng] : _NKC_CENTER;
+
+    if (!_locMap) {
+      _locMap = L.map('loc-map', { zoomControl: true }).setView(center, 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18, attribution: '© OpenStreetMap',
+      }).addTo(_locMap);
+      _locMap.on('click', (e) => _setLocMarker(e.latlng.lat, e.latlng.lng));
+    } else {
+      _locMap.setView(center, _locMarker ? 15 : 14);
+      setTimeout(() => _locMap.invalidateSize(), 150);
+    }
+
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      _setLocMarker(lat, lng, /*skipInputs*/ true);
+    } else if (_locMarker) {
+      _locMap.removeLayer(_locMarker);
+      _locMarker = null;
+    }
+  }
+
+  function _setLocMarker(lat, lng, skipInputs) {
+    if (!_locMap) return;
+    if (_locMarker) {
+      _locMarker.setLatLng([lat, lng]);
+    } else {
+      _locMarker = L.marker([lat, lng], { draggable: true }).addTo(_locMap);
+      _locMarker.on('dragend', () => {
+        const p = _locMarker.getLatLng();
+        $('loc-lat').value = p.lat.toFixed(8);
+        $('loc-lng').value = p.lng.toFixed(8);
+      });
+    }
+    if (!skipInputs) {
+      $('loc-lat').value = lat.toFixed(8);
+      $('loc-lng').value = lng.toFixed(8);
+    }
+  }
+
+  async function fetchLocations() {
+    try {
+      const resp = await Auth.authFetch('/api/admin/locations');
+      if (resp.ok) {
+        const data = await resp.json();
+        _allLocations = data.data || [];
+        return;
+      }
+    } catch (_) {}
+    _allLocations = [];
+  }
+
+  async function renderLocations() {
+    await fetchLocations();
+    const query = _locSearch.toLowerCase();
+    const locations = query
+      ? _allLocations.filter(l =>
+          (l.name || '').toLowerCase().includes(query) ||
+          (l.nameAr || '').includes(query) ||
+          (l.quartier || '').toLowerCase().includes(query))
+      : _allLocations;
+
+    const tbody = $('locations-body');
+    if (!tbody) return;
+
+    if (locations.length === 0) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Aucun lieu trouvé. Le backend est peut-être hors ligne.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = locations.map(l => {
+      const disabled  = !l.is_active;
+      const addedByAdmin = !!l.created_by;
+      const addedLabel = addedByAdmin
+        ? new Date(l.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
+        : '—';
+      return `
+      <tr class="${disabled ? 'row-blocked' : ''}">
+        <td>
+          <div style="font-weight:700;color:var(--text)">${l.name || '—'}</div>
+          <div style="font-size:11px;color:var(--text3)" dir="rtl">${l.nameAr || ''}</div>
+        </td>
+        <td><span class="badge">${_LOCATION_TYPE_LABELS[l.type] || l.type}</span></td>
+        <td>${l.quartier || '—'}</td>
+        <td style="font-family:monospace;font-size:11.5px;color:var(--text3)">${Number(l.lat).toFixed(5)}, ${Number(l.lng).toFixed(5)}</td>
+        <td style="font-size:12px;color:var(--text3)">
+          ${addedByAdmin ? addedLabel : '<span class="badge" style="font-size:10.5px">Catalogue</span>'}
+        </td>
+        <td>
+          <span class="badge ${disabled ? 'refused' : 'accepted'}" style="font-size:11px">
+            ${disabled ? '🔒 Désactivé' : '✓ Actif'}
+          </span>
+        </td>
+        <td>
+          <div class="action-btns">
+            <button class="icon-btn-sm" onclick='openLocationForm(${JSON.stringify(l)})' title="Modifier">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="icon-btn-sm ${disabled ? 'success' : 'warning'}" onclick="toggleLocation(${l.id}, ${disabled})" title="${disabled ? 'Activer' : 'Désactiver'}">
+              ${disabled
+                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>'}
+            </button>
+            ${addedByAdmin ? `
+            <button class="icon-btn-sm danger" onclick='deleteLocation(${l.id}, ${JSON.stringify(l.name || "")})' title="Supprimer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>` : ''}
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  window.openLocationForm = function (location) {
+    $('loc-form-err').textContent = '';
+    const isEdit = !!(location && location.id);
+    $('location-form-title').textContent = isEdit ? 'Modifier le lieu' : 'Ajouter un lieu';
+    $('loc-id').value       = isEdit ? location.id : '';
+    $('loc-name').value     = isEdit ? location.name || '' : '';
+    $('loc-name-ar').value  = isEdit ? location.nameAr || '' : '';
+    $('loc-name-ha').value  = isEdit ? location.nameHa || '' : '';
+    $('loc-type').value     = isEdit ? location.type || 'autre' : 'autre';
+    $('loc-lat').value      = isEdit ? location.lat : '';
+    $('loc-lng').value      = isEdit ? location.lng : '';
+    $('loc-map-search').value = '';
+    $('loc-map-search-results').classList.add('hidden');
+
+    goSection('location-form');
+    setTimeout(() => {
+      _initLocMap(
+        isEdit ? Number(location.lat) : undefined,
+        isEdit ? Number(location.lng) : undefined
+      );
+    }, 60);
+  };
+
+  window.closeLocationForm = function () {
+    goSection('locations');
+  };
+
+  // ── Recherche d'adresse sur la carte du formulaire (Nominatim, gratuit) ──
+  let _locSearchTimer = null;
+  async function _searchLocationOnMap(query) {
+    try {
+      const r = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', Nouakchott, Mauritanie')}&format=json&limit=5&countrycodes=mr&accept-language=fr`,
+        { headers: { 'Accept-Language': 'fr' } }
+      );
+      if (!r.ok) return [];
+      return await r.json();
+    } catch (_) { return []; }
+  }
+
+  function _wireLocMapSearch() {
+    const input = $('loc-map-search');
+    const box   = $('loc-map-search-results');
+    if (!input || !box) return;
+
+    input.addEventListener('input', () => {
+      clearTimeout(_locSearchTimer);
+      const q = input.value.trim();
+      if (q.length < 3) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+      _locSearchTimer = setTimeout(async () => {
+        const results = await _searchLocationOnMap(q);
+        if (!results.length) { box.innerHTML = '<div class="loc-map-search-item">Aucun résultat.</div>'; box.classList.remove('hidden'); return; }
+        box.innerHTML = results.map((r, i) => `<div class="loc-map-search-item" data-i="${i}">${_escLoc(r.display_name)}</div>`).join('');
+        box.classList.remove('hidden');
+        box._results = results;
+      }, 320);
+    });
+
+    box.addEventListener('click', (e) => {
+      const item = e.target.closest('.loc-map-search-item');
+      if (!item || !box._results) return;
+      const r = box._results[Number(item.dataset.i)];
+      if (!r) return;
+      const lat = parseFloat(r.lat), lng = parseFloat(r.lon);
+      _setLocMarker(lat, lng);
+      if (_locMap) _locMap.setView([lat, lng], 16);
+      box.classList.add('hidden');
+    });
+
+    input.addEventListener('blur', () => setTimeout(() => box.classList.add('hidden'), 220));
+  }
+
+  function _escLoc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  window.saveLocationForm = async function () {
+    const errEl = $('loc-form-err');
+    errEl.textContent = '';
+
+    const id       = $('loc-id').value;
+    const name     = $('loc-name').value.trim();
+    const lat      = parseFloat($('loc-lat').value);
+    const lng      = parseFloat($('loc-lng').value);
+
+    if (!name) { errEl.textContent = 'Le nom (français) est obligatoire.'; return; }
+    if (isNaN(lat) || isNaN(lng)) { errEl.textContent = 'Placez le lieu sur la carte (ou saisissez latitude/longitude).'; return; }
+
+    const payload = {
+      name, lat, lng,
+      name_ar: $('loc-name-ar').value.trim(),
+      name_ha: $('loc-name-ha').value.trim(),
+      type:    $('loc-type').value,
+    };
+
+    try {
+      const url    = id ? `/api/admin/locations/${id}` : '/api/admin/locations';
+      const method = id ? 'PUT' : 'POST';
+      const resp   = await Auth.authFetch(url, { method, body: JSON.stringify(payload) });
+      const data   = await resp.json();
+      if (!resp.ok) { errEl.textContent = data.error || 'Erreur lors de l\'enregistrement.'; return; }
+      toast(id ? 'Lieu mis à jour.' : 'Lieu créé.', 'success');
+      closeLocationForm();
+      renderLocations();
+    } catch (_) {
+      errEl.textContent = 'Backend hors ligne — impossible d\'enregistrer.';
+    }
+  };
+
+  window.toggleLocation = function (id, currentlyDisabled) {
+    adminConfirm(
+      currentlyDisabled ? '📍' : '🔒',
+      currentlyDisabled ? 'Activer le lieu' : 'Désactiver le lieu',
+      currentlyDisabled
+        ? 'Le chat pourra à nouveau proposer ce lieu.'
+        : 'Le chat ne proposera plus ce lieu (il reste dans l\'historique des courses passées).',
+      currentlyDisabled ? 'Activer' : 'Désactiver',
+      currentlyDisabled ? 'warning-btn' : '',
+      async () => {
+        try {
+          const resp = await Auth.authFetch(`/api/admin/locations/${id}/toggle`, { method: 'PUT' });
+          if (resp.ok) { toast(currentlyDisabled ? 'Lieu activé.' : 'Lieu désactivé.', 'success'); renderLocations(); return; }
+        } catch (_) {}
+        toast('Backend hors ligne — action impossible.', 'danger');
+      });
+  };
+
+  // Réservé aux lieux ajoutés par un admin (created_by non nul) -- le
+  // catalogue de base n'est jamais supprimable, seulement désactivable.
+  window.deleteLocation = function (id, name) {
+    adminConfirm(
+      '🗑️',
+      'Supprimer le lieu',
+      `"${name}" sera définitivement supprimé et ne sera plus proposé par le chat. Cette action est irréversible.`,
+      'Supprimer',
+      'warning-btn',
+      async () => {
+        try {
+          const resp = await Auth.authFetch(`/api/admin/locations/${id}`, { method: 'DELETE' });
+          if (resp.ok) { toast('Lieu supprimé.', 'success'); renderLocations(); return; }
+          const data = await resp.json().catch(() => ({}));
+          toast(data.error || 'Suppression impossible.', 'danger');
+        } catch (_) {
+          toast('Backend hors ligne — action impossible.', 'danger');
+        }
+      });
+  };
+
   // ── SETTINGS SUB-PANEL ───────────────────────────────────────────
   window.openSettingsPanel = function (category) {
     $('settings-overview').classList.add('hidden');
@@ -735,6 +1013,20 @@
 
   bindSearch('user-search', function (v) { _userSearch = v; renderUsers(); /* async ok */ });
   bindSearch('req-search',  function (v) { _reqSearch  = v; renderRequests(); });
+  bindSearch('location-search', function (v) { _locSearch = v; renderLocations(); /* async ok */ });
+  _wireLocMapSearch();
+
+  // Saisie manuelle lat/lng -> déplace aussi le marqueur sur la carte.
+  ['loc-lat', 'loc-lng'].forEach(id => {
+    $(id)?.addEventListener('change', () => {
+      const lat = parseFloat($('loc-lat').value);
+      const lng = parseFloat($('loc-lng').value);
+      if (!isNaN(lat) && !isNaN(lng) && _locMap) {
+        _setLocMarker(lat, lng, /*skipInputs*/ true);
+        _locMap.setView([lat, lng], 15);
+      }
+    });
+  });
 
   // ── Logout ──────────────────────────────────────────────────────
   window.adminLogout = function () { Auth.logout(); };

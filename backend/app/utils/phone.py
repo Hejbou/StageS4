@@ -24,9 +24,3 @@ def normalize_phone(phone: str) -> str:
             "Un numéro mauritanien doit avoir 8 chiffres et commencer par 2, 3 ou 4."
         )
     return clean
-
-
-def operator_name(phone: str) -> str:
-    """Retourne le nom de l'opérateur selon le premier chiffre."""
-    first = str(phone)[0] if phone else ""
-    return {"2": "Mauritel / Moov Africa", "3": "Mattel", "4": "Chinguitel"}.get(first, "Inconnu")

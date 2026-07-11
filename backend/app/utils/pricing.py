@@ -1,6 +1,4 @@
 import math
-from datetime import datetime
-from flask import current_app
 
 
 def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -15,10 +13,7 @@ def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
-def calculate_price(
-    distance_km: float,
-    now: datetime | None = None,
-) -> float:
+def calculate_price(distance_km: float) -> float:
     """
     Tarification MRU (Ouguiya mauritanien) :
         100 MRU de base + 50 MRU par tranche de 4 km complète.

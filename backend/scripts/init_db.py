@@ -29,7 +29,7 @@ with app.app_context():
     db.drop_all()
     print("Creation des tables...")
     db.create_all()
-    print("OK - Tables creees : users, drivers, chat_sessions, chat_messages, trips, notifications")
+    print("OK - Tables creees : users, drivers, chat_sessions, chat_messages, trips, notifications, locations")
 
     # Seed admin user
     admin_phone = os.getenv("ADMIN_PHONE", "20000000")

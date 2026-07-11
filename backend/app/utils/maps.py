@@ -11,12 +11,12 @@ Si GOOGLE_MAPS_API_KEY est vide, le fallback interroge la table
 frontend) — plus de liste séparée codée en dur ici.
 """
 
-import math
 import re
 import requests
 from flask import current_app
 
 from ..models import Location
+from .pricing import haversine_km
 
 
 def _get_client():
@@ -34,17 +34,6 @@ def _get_client():
 def _normalize(text: str) -> str:
     """Normalise le texte pour la recherche dans le fallback."""
     return re.sub(r"\s+", " ", text.strip().lower())
-
-
-def _haversine(lat1, lng1, lat2, lng2) -> float:
-    """Distance à vol d'oiseau en km."""
-    R = 6371
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    a = (math.sin(d_lat / 2) ** 2
-         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
-         * math.sin(d_lng / 2) ** 2)
-    return R * 2 * math.asin(math.sqrt(a))
 
 
 # ── Fallback sans clé Google Maps : recherche dans la table `locations` ──
@@ -243,7 +232,7 @@ def distance_matrix(
             current_app.logger.warning(f"Maps distance_matrix error: {e}")
 
     # ── Fallback Haversine (×1.35 pour route réelle approx.) ────
-    crow = _haversine(origin_lat, origin_lng, dest_lat, dest_lng)
+    crow = haversine_km(origin_lat, origin_lng, dest_lat, dest_lng)
     road = round(crow * 1.35, 2)
     mins = max(5, int(road / 30 * 60))   # vitesse moyenne 30 km/h en ville
     return {
@@ -317,7 +306,7 @@ def reverse_geocode(lat: float, lng: float, language: str = "fr") -> dict:
     for loc in Location.query.filter_by(is_active=True).all():
         if not loc.quartier:
             continue
-        d = _haversine(lat, lng, float(loc.lat), float(loc.lng))
+        d = haversine_km(lat, lng, float(loc.lat), float(loc.lng))
         if best_dist is None or d < best_dist:
             nearest, best_dist = loc, d
     if nearest and best_dist is not None and best_dist <= 3:  # 3 km

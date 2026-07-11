@@ -456,17 +456,6 @@ const PoiDB = (() => {
     return POIS.filter(p => p.type === type);
   }
 
-  // ── Distance à vol d'oiseau en mètres (Haversine) ─────────────
-  function _haversineM(lat1, lng1, lat2, lng2) {
-    const R = 6371000;
-    const toRad = d => (d * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const a = Math.sin(dLat / 2) ** 2
-      + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.asin(Math.sqrt(a));
-  }
-
   // ── Recherche de proximité — repères réels dans un rayon donné ───
   // Contrairement à nearbyLandmarks (qui regroupe par le champ texte
   // "quartier"), ceci calcule la vraie distance GPS. Sans rayon explicite,
@@ -485,7 +474,7 @@ const PoiDB = (() => {
 
     function within(radius) {
       return pool
-        .map(p => ({ p, d: _haversineM(lat, lng, p.lat, p.lng) }))
+        .map(p => ({ p, d: Geo.haversineM(lat, lng, p.lat, p.lng) }))
         .filter(x => x.d <= radius)
         .sort((a, b) => a.d - b.d);
     }

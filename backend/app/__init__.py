@@ -37,6 +37,7 @@ def create_app(config_class=Config):
     from .routes.notifications import notif_bp
     from .routes.admin         import admin_bp
     from .routes.locations     import locations_bp
+    from .routes.llm_settings  import llm_settings_bp
 
     app.register_blueprint(auth_bp,   url_prefix="/api/auth")
     app.register_blueprint(trips_bp,  url_prefix="/api/trips")
@@ -46,6 +47,7 @@ def create_app(config_class=Config):
     app.register_blueprint(notif_bp,  url_prefix="/api/notifications")
     app.register_blueprint(admin_bp,  url_prefix="/api/admin")
     app.register_blueprint(locations_bp, url_prefix="/api/locations")
+    app.register_blueprint(llm_settings_bp, url_prefix="/api/admin/llm-settings")
 
     # ── Health check ─────────────────────────────────────────
     @app.get("/api/health")

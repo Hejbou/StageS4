@@ -492,6 +492,7 @@
 <script src="translations/ha.js"></script>
 <script src="js/i18n.js"></script>
 <script src="js/lang-detect.js"></script>
+<script src="js/geo-utils.js"></script>
 <script src="js/mock-data.js"></script>
 <script src="js/poi-db.js"></script>
 <script src="js/notifications.js"></script>
@@ -538,7 +539,7 @@ const UserSettings = (() => {
     document.getElementById('settings-since').textContent = since;
 
     // Trip count
-    const trips = JSON.parse(localStorage.getItem('chatia_requests') || '[]');
+    const trips = JSON.parse(localStorage.getItem('naqlabot_requests') || '[]');
     const myTrips = trips.filter(t => t.phone === u.phone || t.clientPhone === u.phone);
     document.getElementById('settings-trip-count').textContent = myTrips.length;
 

@@ -6,28 +6,19 @@ from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..extensions import db
 from ..models import User, Trip, Driver, Location
-from ..utils import ok, created, error, not_found, forbidden, unauthorized
+from ..models.location import LOCATION_TYPES
+from ..utils import ok, created, error, not_found
+from ..utils.auth_helpers import require_admin
 from ..utils.maps import reverse_geocode, generate_aliases
 
-_LOCATION_TYPES = ("quartier", "marche", "hopital", "mosquee", "ecole",
-                   "carrefour", "station", "admin", "hotel", "autre")
-
 admin_bp = Blueprint("admin", __name__)
-
-
-def _require_admin():
-    phone = get_jwt_identity()
-    user  = User.query.get(phone)
-    if not user or user.role != "admin":
-        return None, forbidden("Accès réservé aux administrateurs")
-    return user, None
 
 
 # ── GET /api/admin/stats ───────────────────────────────────────────────
 @admin_bp.get("/stats")
 @jwt_required()
 def stats():
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     total_users    = User.query.count()
@@ -49,7 +40,7 @@ def stats():
 @admin_bp.get("/users")
 @jwt_required()
 def list_users():
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     q    = request.args.get("q", "").strip()
@@ -71,7 +62,7 @@ def list_users():
 @admin_bp.delete("/users/<phone>")
 @jwt_required()
 def delete_user(phone):
-    me, err = _require_admin()
+    me, err = require_admin()
     if err: return err
 
     if phone == me.phone:
@@ -92,7 +83,7 @@ def delete_user(phone):
 @admin_bp.put("/users/<phone>/toggle")
 @jwt_required()
 def toggle_user(phone):
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     user = User.query.get(phone)
@@ -109,7 +100,7 @@ def toggle_user(phone):
 @admin_bp.get("/trips")
 @jwt_required()
 def admin_trips():
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     status = request.args.get("status")
@@ -155,8 +146,8 @@ def _validate_location_payload(data, partial=False):
 
     if "type" in data or not partial:
         loc_type = data.get("type") or "autre"
-        if loc_type not in _LOCATION_TYPES:
-            return None, f"type doit être l'un de : {', '.join(_LOCATION_TYPES)}"
+        if loc_type not in LOCATION_TYPES:
+            return None, f"type doit être l'un de : {', '.join(LOCATION_TYPES)}"
         clean["type"] = loc_type
 
     if "lat" in data or not partial:
@@ -196,7 +187,7 @@ def _apply_geo_fields(location):
 @admin_bp.get("/locations")
 @jwt_required()
 def admin_list_locations():
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     q = request.args.get("q", "").strip()
@@ -215,7 +206,7 @@ def admin_list_locations():
 @admin_bp.post("/locations")
 @jwt_required()
 def admin_create_location():
-    me, err = _require_admin()
+    me, err = require_admin()
     if err: return err
 
     data = request.get_json(silent=True) or {}
@@ -234,7 +225,7 @@ def admin_create_location():
 @admin_bp.put("/locations/<int:location_id>")
 @jwt_required()
 def admin_update_location(location_id):
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     location = Location.query.get(location_id)
@@ -257,7 +248,7 @@ def admin_update_location(location_id):
 @admin_bp.put("/locations/<int:location_id>/toggle")
 @jwt_required()
 def admin_toggle_location(location_id):
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     location = Location.query.get(location_id)
@@ -277,7 +268,7 @@ def admin_toggle_location(location_id):
 @admin_bp.delete("/locations/<int:location_id>")
 @jwt_required()
 def admin_delete_location(location_id):
-    _, err = _require_admin()
+    _, err = require_admin()
     if err: return err
 
     location = Location.query.get(location_id)

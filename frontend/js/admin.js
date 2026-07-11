@@ -51,9 +51,11 @@
   }
 
   // ── Get all requests from Transport localStorage ─────────────────
+  // Même clé que MockData.getRequests()/saveRequests() (mock-data.js) —
+  // c'est là que transport.js persiste réellement les courses.
   function getRequests() {
     try {
-      return JSON.parse(localStorage.getItem('chatia_requests') || '[]');
+      return JSON.parse(localStorage.getItem('naqlabot_requests') || '[]');
     } catch (_) { return []; }
   }
 
@@ -384,7 +386,7 @@
     const idx = requests.findIndex(x => x.id === id);
     if (idx === -1) return;
     requests[idx].status = newStatus;
-    localStorage.setItem('chatia_requests', JSON.stringify(requests));
+    localStorage.setItem('naqlabot_requests', JSON.stringify(requests));
     toast('Statut mis à jour : ' + _statusLabel(newStatus), 'success');
     renderRequests();
     renderDashboard();
@@ -678,12 +680,14 @@
       behavior: 'Comportement IA',
       call:     'Appel & Voix IA',
       training: 'Entraînement IA',
+      llm:      'Fournisseur LLM',
     };
     $('sub-panel-title').textContent = titles[category] || 'Paramètres';
     $('sub-panel-body').innerHTML = _buildPanelBody(category);
 
     // Populate with stored values
     renderSettings();
+    if (category === 'llm') loadLlmSettings(); // async, fire-and-forget
     setTimeout(() => panel.classList.add('visible'), 10);
   };
 
@@ -847,6 +851,86 @@
 
       <button class="save-btn" onclick="saveTraining()">${saveIcon} Sauvegarder l'entraînement IA</button>`;
 
+    if (cat === 'llm') return `
+      <p style="font-size:12.5px;color:var(--text3);margin:-4px 0 4px;">
+        Prépare la configuration du futur fournisseur LLM. Tant que le provider "Rules" est sélectionné, le chat continue d'utiliser le moteur actuel — rien ici n'est encore branché sur les réponses de l'IA.
+      </p>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Fournisseur</div>
+        <select class="setting-input" id="llm-provider" onchange="document.getElementById('llm-provider-custom-wrap').style.display = this.value === 'autre' ? '' : 'none'">
+          <option value="rules">Rules — moteur actuel (aucun appel externe)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="groq">Groq</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="autre">Autre…</option>
+        </select>
+      </div>
+
+      <div class="sub-panel-section" id="llm-provider-custom-wrap" style="display:none">
+        <div class="sub-panel-section-label">Nom du fournisseur personnalisé</div>
+        <input type="text" class="setting-input" id="llm-provider-custom" placeholder="ex: mistral">
+      </div>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Modèle</div>
+        <input type="text" class="setting-input" id="llm-model" placeholder="ex: gemini-2.0-flash, llama-3.3-70b-versatile...">
+      </div>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Clé API</div>
+        <input type="password" class="setting-input" id="llm-api-key" placeholder="Laisser vide pour ne pas modifier" autocomplete="new-password">
+        <div class="sub-panel-hint" id="llm-api-key-hint">Aucune clé enregistrée.</div>
+      </div>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Température</div>
+        <input type="number" class="setting-input" id="llm-temperature" min="0" max="2" step="0.1">
+        <div class="sub-panel-hint">0 = réponses strictes et prévisibles · 2 = réponses très variées.</div>
+      </div>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Max tokens</div>
+        <input type="number" class="setting-input" id="llm-max-tokens" min="1" step="1">
+        <div class="sub-panel-hint">Longueur maximale d'une réponse générée par le LLM.</div>
+      </div>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Prompt système</div>
+        <textarea class="setting-input" id="llm-system-prompt" rows="5" placeholder="ex: Tu es l'assistant transport de NaqlaBot à Nouakchott. Tu aides uniquement à identifier un départ, une destination et à réserver une course..."></textarea>
+        <div class="sub-panel-hint">Instructions envoyées au LLM avant chaque conversation.</div>
+      </div>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Langues activées</div>
+        <div style="display:flex;gap:16px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;"><input type="checkbox" id="llm-lang-fr"> Français</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;"><input type="checkbox" id="llm-lang-ar"> Arabe</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;"><input type="checkbox" id="llm-lang-ha"> Hassaniya</label>
+        </div>
+        <div class="sub-panel-hint">Langues pour lesquelles le LLM est autorisé à répondre.</div>
+      </div>
+
+      <div class="sub-panel-section">
+        <div class="sub-panel-section-label">Taille de l'historique envoyé au LLM</div>
+        <input type="number" class="setting-input" id="llm-history-size" min="1" max="50" step="1">
+        <div class="sub-panel-hint">Nombre de derniers messages de la conversation transmis comme contexte.</div>
+      </div>
+
+      <div class="sub-panel-section">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="llm-strict-transport">
+          <span class="sub-panel-section-label" style="margin:0">Mode strict Transport</span>
+        </label>
+        <div class="sub-panel-hint">Si activé, le LLM ne répond qu'aux questions liées au transport et à la réservation — tout le reste est redirigé.</div>
+      </div>
+
+      <span class="admin-confirm-msg" id="llm-form-err" style="display:block;color:#DC2626;font-size:12.5px;"></span>
+
+      <button class="save-btn" onclick="saveLlmSettings()">${saveIcon} Sauvegarder la configuration LLM</button>`;
+
     return '<p>Sélectionnez une catégorie.</p>';
   }
 
@@ -993,12 +1077,94 @@
     toast('Entraînement IA sauvegardé !', 'success');
   };
 
+  // ── FOURNISSEUR LLM ───────────────────────────────────────────────
+  // Table backend dédiée (voir /api/admin/llm-settings) — pas localStorage,
+  // pour ne jamais exposer la clé API au navigateur (voir GET, qui ne
+  // renvoie qu'un booléen apiKeySet). Structure prête pour le futur
+  // provider LLM ; le moteur "rules" actuel n'en tient pas encore compte.
+  const _LLM_KNOWN_PROVIDERS = ['rules', 'gemini', 'groq', 'openrouter', 'openai', 'anthropic'];
+
+  async function loadLlmSettings() {
+    const errEl = $('llm-form-err');
+    if (errEl) errEl.textContent = '';
+    try {
+      const resp = await Auth.authFetch('/api/admin/llm-settings/');
+      if (!resp.ok) throw new Error('bad response');
+      const s = (await resp.json()).data;
+
+      const isKnown = _LLM_KNOWN_PROVIDERS.includes(s.provider);
+      $('llm-provider').value = isKnown ? s.provider : 'autre';
+      $('llm-provider-custom-wrap').style.display = isKnown ? 'none' : '';
+      $('llm-provider-custom').value = isKnown ? '' : s.provider;
+      $('llm-model').value = s.modelName || '';
+      $('llm-api-key').value = '';
+      $('llm-api-key-hint').textContent = s.apiKeySet
+        ? 'Une clé est déjà enregistrée — laissez vide pour la garder.'
+        : 'Aucune clé enregistrée.';
+      $('llm-temperature').value = s.temperature;
+      $('llm-max-tokens').value = s.maxTokens;
+      $('llm-system-prompt').value = s.systemPrompt || '';
+      $('llm-lang-fr').checked = s.enabledLanguages.includes('fr');
+      $('llm-lang-ar').checked = s.enabledLanguages.includes('ar');
+      $('llm-lang-ha').checked = s.enabledLanguages.includes('ha');
+      $('llm-history-size').value = s.historySize;
+      $('llm-strict-transport').checked = !!s.strictTransportMode;
+    } catch (_) {
+      if (errEl) errEl.textContent = 'Backend hors ligne — impossible de charger la configuration LLM.';
+    }
+  }
+
+  window.saveLlmSettings = async function () {
+    const errEl = $('llm-form-err');
+    errEl.textContent = '';
+
+    const providerSel = $('llm-provider').value;
+    const provider = providerSel === 'autre' ? $('llm-provider-custom').value.trim() : providerSel;
+    if (providerSel === 'autre' && !provider) { errEl.textContent = 'Précisez le nom du fournisseur personnalisé.'; return; }
+
+    const langs = [];
+    if ($('llm-lang-fr').checked) langs.push('fr');
+    if ($('llm-lang-ar').checked) langs.push('ar');
+    if ($('llm-lang-ha').checked) langs.push('ha');
+    if (!langs.length) { errEl.textContent = 'Activez au moins une langue.'; return; }
+
+    const payload = {
+      provider,
+      modelName:   $('llm-model').value.trim(),
+      temperature: parseFloat($('llm-temperature').value),
+      maxTokens:   parseInt($('llm-max-tokens').value, 10),
+      systemPrompt: $('llm-system-prompt').value.trim(),
+      enabledLanguages: langs,
+      historySize: parseInt($('llm-history-size').value, 10),
+      strictTransportMode: $('llm-strict-transport').checked,
+    };
+    // Clé API : n'envoyer le champ que si l'admin a tapé quelque chose,
+    // pour ne jamais écraser une clé déjà enregistrée avec une valeur vide.
+    const apiKey = $('llm-api-key').value;
+    if (apiKey) payload.apiKey = apiKey;
+
+    if (isNaN(payload.temperature) || isNaN(payload.maxTokens) || isNaN(payload.historySize)) {
+      errEl.textContent = 'Température, max tokens et taille d\'historique doivent être des nombres.';
+      return;
+    }
+
+    try {
+      const resp = await Auth.authFetch('/api/admin/llm-settings/', { method: 'PUT', body: JSON.stringify(payload) });
+      const data = await resp.json();
+      if (!resp.ok) { errEl.textContent = data.error || 'Erreur lors de l\'enregistrement.'; return; }
+      toast('Configuration LLM sauvegardée.', 'success');
+      loadLlmSettings();
+    } catch (_) {
+      errEl.textContent = 'Backend hors ligne — impossible d\'enregistrer.';
+    }
+  };
+
   window.resetAllData = function () {
     adminConfirm('🗑️', 'Effacer toutes les courses',
       'Cette action supprimera définitivement toutes les courses. Irréversible.',
       'Effacer tout', '',
       () => {
-        localStorage.removeItem('chatia_requests');
+        localStorage.removeItem('naqlabot_requests');
         toast('Données courses supprimées.', 'danger');
         renderDashboard();
         renderRequests();

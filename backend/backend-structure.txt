@@ -3,36 +3,42 @@ backend/
 ├── requirements.txt            ← Dépendances pip
 ├── .env                        ← Configuration (à adapter)
 ├── app/
-│   ├── __init__.py             ← Factory Flask
-│   ├── config.py               ← Config MySQL, JWT, pricing
+│   ├── __init__.py             ← Factory Flask, enregistre tous les blueprints
+│   ├── config.py               ← Config MySQL, JWT, CORS, Google Maps
 │   ├── extensions.py           ← db, jwt, cors, bcrypt
 │   ├── models/
 │   │   ├── user.py             ← Clé primaire = téléphone mauritanien
 │   │   ├── driver.py           ← Profil chauffeur
-│   │   ├── location.py         ← 18 zones Nouakchott
-│   │   ├── trip.py             ← Courses + notes
-│   │   ├── chat.py             ← Historique conversations
-│   │   └── notification.py     ← Notifications
+│   │   ├── location.py         ← Table `locations` (catalogue de lieux, gérée depuis le dashboard admin)
+│   │   ├── trip.py             ← Courses
+│   │   ├── chat.py             ← Historique conversations (non consommé par le frontend actuel)
+│   │   └── notification.py     ← Notifications (non consommé par le frontend actuel)
 │   ├── routes/
-│   │   ├── auth.py             ← register / login / me / profile
-│   │   ├── trips.py            ← CRUD courses + cancel/accept/rate
-│   │   ├── drivers.py          ← Disponibilité + GPS
-│   │   ├── locations.py        ← Lieux + estimation prix
-│   │   ├── chat.py             ← Sessions + messages
-│   │   └── notifications.py    ← Notifications
+│   │   ├── auth.py             ← register / login / refresh / me / lookup / profile
+│   │   ├── trips.py            ← CRUD courses + cancel/accept/complete
+│   │   ├── drivers.py          ← Disponibilité + GPS (non consommé par le frontend actuel)
+│   │   ├── locations.py        ← Lecture publique des lieux (liste + proximité)
+│   │   ├── admin.py            ← Users/trips/locations réservés admin (JWT + rôle)
+│   │   ├── maps.py             ← Autocomplete/geocode/distance/resolve
+│   │   ├── chat.py             ← Sessions + messages (non consommé par le frontend actuel)
+│   │   └── notifications.py    ← Notifications (non consommé par le frontend actuel)
 │   └── utils/
 │       ├── phone.py            ← Validation 2|3|4 + 7 chiffres
-│       ├── pricing.py          ← Haversine + MRU (50 + 25/km)
+│       ├── pricing.py          ← Haversine (haversine_km) + tarif MRU (100 + 50/4km)
+│       ├── maps.py             ← Google Maps optionnel, fallback table `locations` + Nominatim
 │       └── responses.py        ← ok() / created() / error()
 ├── database/
-│   ├── schema.sql              ← Toutes les tables MySQL
-│   └── seed.sql                ← 18 lieux + 11 utilisateurs test
+│   └── schema.sql              ← Toutes les tables MySQL (users, drivers, chat_sessions,
+│                                  chat_messages, trips, notifications, locations)
 └── scripts/
-    └── init_db.py              ← Initialise DB + lieux + admin
+    ├── init_db.py              ← Recrée les tables depuis les modèles + crée l'admin
+    └── seed_locations.py       ← Peuple la table `locations` (41 lieux de Nouakchott)
+
 cd backend
 python -m venv venv && venv\Scripts\activate
 pip install -r requirements.txt
 # Mettre DB_PASSWORD dans .env
 mysql -u root -p < database/schema.sql
 python scripts/init_db.py
+python scripts/seed_locations.py
 python run.py

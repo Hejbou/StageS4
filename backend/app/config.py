@@ -42,10 +42,4 @@ class Config:
     MAPS_DEFAULT_LAT    = 18.0735
     MAPS_DEFAULT_LNG    = -15.9582
     MAPS_COUNTRY        = "mr"
-    MAPS_LANGUAGE       = "fr"
     MAPS_RADIUS_M       = 50000
-
-    # ── Pricing (MRU) ────────────────────────────────────────
-    PRICING_BASE_FARE = float(os.getenv("PRICING_BASE_FARE", "100"))
-    PRICING_PER_BLOCK = float(os.getenv("PRICING_PER_BLOCK", "50"))
-    PRICING_BLOCK_KM  = float(os.getenv("PRICING_BLOCK_KM",  "4"))

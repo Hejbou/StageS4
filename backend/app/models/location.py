@@ -1,6 +1,12 @@
 from datetime import datetime
 from ..extensions import db
 
+# Seule source de vérité pour les types de lieu — réutilisé tel quel par
+# routes/admin.py pour la validation, afin de ne jamais désynchroniser
+# la colonne Enum et la liste acceptée côté API.
+LOCATION_TYPES = ("quartier", "marche", "hopital", "mosquee", "ecole",
+                  "carrefour", "station", "admin", "hotel", "autre")
+
 
 class Location(db.Model):
     """Lieu / point de repère — source unique pour le chat IA (précision de
@@ -13,8 +19,7 @@ class Location(db.Model):
     name_ar  = db.Column(db.String(150), nullable=True)
     name_ha  = db.Column(db.String(150), nullable=True)
     type     = db.Column(
-        db.Enum("quartier", "marche", "hopital", "mosquee", "ecole",
-                 "carrefour", "station", "admin", "hotel", "autre"),
+        db.Enum(*LOCATION_TYPES),
         nullable=False, default="autre"
     )
     quartier = db.Column(db.String(100), nullable=True)

@@ -21,17 +21,6 @@ const MapView = (() => {
     return 100 + Math.floor(km / 4) * 50;
   }
 
-  // ── Haversine ────────────────────────────────────────────────────
-  function _hav(lat1, lng1, lat2, lng2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2
-            + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
-            * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-
   // ── Reverse geocode (Nominatim, gratuit) ────────────────────────
   async function _revGeocode(lat, lng) {
     try {
@@ -210,7 +199,7 @@ const MapView = (() => {
     } catch {}
 
     // Fallback haversine × 1.35
-    const km  = _hav(_originGeo.lat, _originGeo.lng, _destGeo.lat, _destGeo.lng) * 1.35;
+    const km  = Geo.haversineKm(_originGeo.lat, _originGeo.lng, _destGeo.lat, _destGeo.lng) * 1.35;
     const min = Math.round(km / 30 * 60);
     _showPricePanel({
       distance: `~${km.toFixed(1)} km`,

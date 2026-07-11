@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════════
 --  ChatIA — Schéma MySQL complet
 --  Base : chatBot_db
---  Tables : users, drivers, chat_sessions, chat_messages, trips, notifications
+--  Tables : users, drivers, chat_sessions, chat_messages, trips, notifications, locations
 -- ═══════════════════════════════════════════════════════════════════
 
 CREATE DATABASE IF NOT EXISTS chatBot_db
@@ -190,3 +190,27 @@ CREATE TABLE IF NOT EXISTS locations (
     INDEX idx_location_active   (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Lieux/points de repère — chat IA (précision de localisation) et géocodage';
+
+
+-- ───────────────────────────────────────────────────────────────────
+--  CONFIGURATION LLM — table singleton (1 seule ligne, id=1)
+--  Préparée à l'avance pour le futur provider LLM (voir nlu.js) : lue et
+--  écrite uniquement par le dashboard admin pour l'instant, aucun
+--  provider ne consomme encore ces valeurs.
+-- ───────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS llm_settings (
+    id                     INT UNSIGNED   NOT NULL,
+    provider               VARCHAR(40)    NOT NULL DEFAULT 'rules' COMMENT 'rules | gemini | groq | openrouter | openai | anthropic | autre',
+    model_name             VARCHAR(120)   NULL,
+    api_key                VARCHAR(255)   NULL     COMMENT 'Jamais renvoyée en clair par l''API (voir to_dict)',
+    temperature            DECIMAL(3,2)   NOT NULL DEFAULT 0.30,
+    max_tokens             INT UNSIGNED   NOT NULL DEFAULT 512,
+    system_prompt          TEXT           NULL,
+    enabled_languages      JSON           NOT NULL,
+    history_size           INT UNSIGNED   NOT NULL DEFAULT 6 COMMENT 'Nombre de derniers messages envoyés au LLM',
+    strict_transport_mode  BOOLEAN        NOT NULL DEFAULT TRUE,
+    updated_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Configuration du futur provider LLM — singleton, non consommée avant intégration';

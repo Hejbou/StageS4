@@ -71,7 +71,15 @@ const App = (() => {
     });
   }
 
-  // ── WhatsApp-style mic: tap to start, stop, send/cancel ─────────
+  // ── Mic button: point d'entrée unique de la dictée vocale ────────
+  // Réutilise VoiceInputService (frontend/js/voice/) : clic → démarre la
+  // reconnaissance vocale → texte inséré dans #chat-input, éditable →
+  // aucun envoi automatique. Remplace l'ancien déclenchement du flux
+  // d'enregistrement façon WhatsApp (Voice.startRecording) depuis CE
+  // bouton — un seul bouton ne peut déclencher qu'un seul comportement.
+  // L'API Voice elle-même (TTS, STT brut, startRecording/...) n'est ni
+  // modifiée ni supprimée : elle continue de fonctionner exactement comme
+  // avant pour le mode Appel (voir call.js), qui ne passe pas par ce bouton.
   function _wireMic() {
     const micBtn   = document.getElementById('mic-btn');
     const stopBtn  = document.getElementById('vrb-stop-btn');
@@ -80,18 +88,17 @@ const App = (() => {
 
     if (micBtn) {
       micBtn.addEventListener('click', () => {
-        if (Voice.isRecording()) {
-          Voice.stopRecording();
+        if (typeof VoiceInputService === 'undefined') return; // dépendance absente : aucune erreur, bouton inactif
+        if (VoiceInputService.isListening()) {
+          VoiceInputService.cancelListening();
         } else {
-          Voice.startRecording((text) => {
-            if (text && text.trim()) {
-              Chat.processInput(text, { mode: 'chat', isVoice: true });
-            }
-          });
+          VoiceInputService.startListening();
         }
       });
     }
 
+    // Barre d'enregistrement WhatsApp historique : conservée intacte (rien
+    // supprimé) même si elle n'est plus déclenchable depuis #mic-btn.
     if (stopBtn)   stopBtn.addEventListener('click',   () => Voice.stopRecording());
     if (sendBtn)   sendBtn.addEventListener('click',   () => Voice.sendRecording());
     if (cancelBtn) cancelBtn.addEventListener('click', () => Voice.cancelRecording());

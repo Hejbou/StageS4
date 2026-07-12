@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="fr" dir="ltr" id="html-root">
 <head>
@@ -497,14 +498,25 @@
 <script src="js/poi-db.js"></script>
 <script src="js/notifications.js"></script>
 <script src="js/voice.js"></script>
+<!-- Dictée vocale du champ de saisie (module indépendant, voir frontend/js/voice/) -->
+<script src="js/voice/speech_service.js"></script>
+<script src="js/voice/voice_ui.js"></script>
+<script src="js/voice/voice.js"></script>
+<!-- Lecture vocale automatique des réponses (Text-to-Speech), module indépendant, voir frontend/js/tts/ -->
+<script src="js/tts/tts.js"></script>
+<script src="js/tts/speech_output.js"></script>
+<script src="js/tts/tts_controller.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script src="js/maps.js"></script>
 <script src="js/transport.js"></script>
 <script src="js/nlu.js"></script>
+<script src="js/ai-chat-client.js"></script>
 <script src="js/chat.js"></script>
 <script src="js/call.js"></script>
 <script src="js/map-view.js"></script>
 <script src="js/app.js"></script>
+<!-- Conversation vocale complète (STT → IA/moteur de règles → TTS), orchestre les modules existants sans les modifier -->
+<script src="js/voice-conversation.js"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 <script>lucide.createIcons();</script>
 

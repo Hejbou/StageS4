@@ -43,3 +43,27 @@ class Config:
     MAPS_DEFAULT_LNG    = -15.9582
     MAPS_COUNTRY        = "mr"
     MAPS_RADIUS_M       = 50000
+
+    # ── OpenAI Realtime (mode vocal — voir routes/realtime.py) ────────
+    # Le backend est le seul à connaître OPENAI_API_KEY : il l'utilise pour
+    # créer des sessions éphémères que le navigateur consomme directement
+    # (frontend/js/realtime-voice.js), sans jamais voir la clé réelle.
+    OPENAI_API_KEY        = os.getenv("OPENAI_API_KEY", "")
+    # Nom de modèle/voix à reconfirmer contre la doc OpenAI Realtime au
+    # moment du premier test réel (Phase 0) — valeurs de départ, pas figées.
+    OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
+    OPENAI_REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "alloy")
+
+    # ── OpenAI Chat (voir app/ai/ + routes/ai_chat.py) ──────────────────
+    # Réutilise OPENAI_API_KEY ci-dessus. Ces valeurs alimentent
+    # OpenAIService (app/ai/openai_service.py) et servent de valeurs par
+    # défaut tant que LlmSettings (dashboard admin) n'est pas consommé par
+    # un vrai provider LLM.
+    # OPENAI_MODEL est le nom de variable attendu par le cahier des charges
+    # (.env) ; on le lit en priorité et on retombe sur OPENAI_CHAT_MODEL
+    # (nom historique de cette config) pour ne rien casser si l'un ou
+    # l'autre est déjà défini dans un environnement existant.
+    OPENAI_CHAT_MODEL  = os.getenv("OPENAI_MODEL", os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"))
+    OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
+    OPENAI_MAX_TOKENS  = int(os.getenv("OPENAI_MAX_TOKENS", "512"))
+    OPENAI_TIMEOUT     = int(os.getenv("OPENAI_TIMEOUT", "15"))

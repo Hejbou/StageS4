@@ -18,16 +18,18 @@
     $$('.nav-link').forEach(n => n.classList.remove('active'));
     const sec = $('section-' + id);
     // La page dédiée "Ajouter/Modifier un lieu" n'a pas son propre lien de
-    // navigation : elle garde "Lieux" actif dans la sidebar.
-    const lnk = $('nav-' + (id === 'location-form' ? 'locations' : id));
+    // navigation : elle garde la section parente active dans la sidebar.
+    const navId = id === 'place-form' ? 'places' : id;
+    const lnk = $('nav-' + navId);
     if (sec) sec.classList.add('active');
     if (lnk) lnk.classList.add('active');
-    document.title = 'ChatIA Admin — ' + (id === 'location-form' ? 'Lieux' : id.charAt(0).toUpperCase() + id.slice(1));
+    document.title = 'ChatIA Admin — ' + (id === 'place-form' ? 'Base des lieux' : id.charAt(0).toUpperCase() + id.slice(1));
     if (id === 'dashboard')  renderDashboard();
     if (id === 'users')      renderUsers();   // async, fire-and-forget
     if (id === 'requests')   renderRequests();
     if (id === 'settings')   renderSettings();
-    if (id === 'locations')  renderLocations(); // async, fire-and-forget
+    if (id === 'places')     renderPlaces();    // async, fire-and-forget
+    if (id === 'geo')        renderGeo();        // async, fire-and-forget
   }
 
   window.goSection = showSection;
@@ -55,7 +57,7 @@
   // c'est là que transport.js persiste réellement les courses.
   function getRequests() {
     try {
-      return JSON.parse(localStorage.getItem('naqlabot_requests') || '[]');
+      return JSON.parse(localStorage.getItem('chatia_requests') || '[]');
     } catch (_) { return []; }
   }
 
@@ -386,169 +388,27 @@
     const idx = requests.findIndex(x => x.id === id);
     if (idx === -1) return;
     requests[idx].status = newStatus;
-    localStorage.setItem('naqlabot_requests', JSON.stringify(requests));
+    localStorage.setItem('chatia_requests', JSON.stringify(requests));
     toast('Statut mis à jour : ' + _statusLabel(newStatus), 'success');
     renderRequests();
     renderDashboard();
     showCourseDetail(id);
   };
 
-  // ── LIEUX (POI) ───────────────────────────────────────────────────
-  const _LOCATION_TYPE_LABELS = {
-    quartier: 'Quartier', marche: 'Marché', hopital: 'Hôpital', mosquee: 'Mosquée',
-    ecole: 'École', carrefour: 'Carrefour', station: 'Station', admin: 'Administration',
-    hotel: 'Hôtel', autre: 'Autre',
+  // ── BASE DES LIEUX (Ville -> Wilaya -> Moughataa -> Lieu) ──────────
+  // Seule gestion de lieux de l'espace admin (l'ancienne page "Lieux",
+  // liée à la table historique `locations`, a été retirée). `locations`
+  // elle-même reste intacte côté backend : le chat, le calcul du prix et
+  // la carte continuent de la lire exactement comme avant.
+  const _PLACE_TYPE_LABELS = {
+    quartier: 'Quartier', marche: 'Marché', hopital: 'Hôpital', clinique: 'Clinique',
+    mosquee: 'Mosquée', ecole: 'École', universite: 'Université', carrefour: 'Carrefour',
+    station: 'Station', admin: 'Administration', hotel: 'Hôtel', autre: 'Autre',
   };
 
-  let _locSearch  = '';
-  let _allLocations = [];
-  let _locMap    = null;
-  let _locMarker = null;
   const _NKC_CENTER = [18.0735, -15.9582];
 
-  function _initLocMap(lat, lng) {
-    if (typeof L === 'undefined') return;
-    const center = (typeof lat === 'number' && typeof lng === 'number') ? [lat, lng] : _NKC_CENTER;
-
-    if (!_locMap) {
-      _locMap = L.map('loc-map', { zoomControl: true }).setView(center, 14);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 18, attribution: '© OpenStreetMap',
-      }).addTo(_locMap);
-      _locMap.on('click', (e) => _setLocMarker(e.latlng.lat, e.latlng.lng));
-    } else {
-      _locMap.setView(center, _locMarker ? 15 : 14);
-      setTimeout(() => _locMap.invalidateSize(), 150);
-    }
-
-    if (typeof lat === 'number' && typeof lng === 'number') {
-      _setLocMarker(lat, lng, /*skipInputs*/ true);
-    } else if (_locMarker) {
-      _locMap.removeLayer(_locMarker);
-      _locMarker = null;
-    }
-  }
-
-  function _setLocMarker(lat, lng, skipInputs) {
-    if (!_locMap) return;
-    if (_locMarker) {
-      _locMarker.setLatLng([lat, lng]);
-    } else {
-      _locMarker = L.marker([lat, lng], { draggable: true }).addTo(_locMap);
-      _locMarker.on('dragend', () => {
-        const p = _locMarker.getLatLng();
-        $('loc-lat').value = p.lat.toFixed(8);
-        $('loc-lng').value = p.lng.toFixed(8);
-      });
-    }
-    if (!skipInputs) {
-      $('loc-lat').value = lat.toFixed(8);
-      $('loc-lng').value = lng.toFixed(8);
-    }
-  }
-
-  async function fetchLocations() {
-    try {
-      const resp = await Auth.authFetch('/api/admin/locations');
-      if (resp.ok) {
-        const data = await resp.json();
-        _allLocations = data.data || [];
-        return;
-      }
-    } catch (_) {}
-    _allLocations = [];
-  }
-
-  async function renderLocations() {
-    await fetchLocations();
-    const query = _locSearch.toLowerCase();
-    const locations = query
-      ? _allLocations.filter(l =>
-          (l.name || '').toLowerCase().includes(query) ||
-          (l.nameAr || '').includes(query) ||
-          (l.quartier || '').toLowerCase().includes(query))
-      : _allLocations;
-
-    const tbody = $('locations-body');
-    if (!tbody) return;
-
-    if (locations.length === 0) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Aucun lieu trouvé. Le backend est peut-être hors ligne.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = locations.map(l => {
-      const disabled  = !l.is_active;
-      const addedByAdmin = !!l.created_by;
-      const addedLabel = addedByAdmin
-        ? new Date(l.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
-        : '—';
-      return `
-      <tr class="${disabled ? 'row-blocked' : ''}">
-        <td>
-          <div style="font-weight:700;color:var(--text)">${l.name || '—'}</div>
-          <div style="font-size:11px;color:var(--text3)" dir="rtl">${l.nameAr || ''}</div>
-        </td>
-        <td><span class="badge">${_LOCATION_TYPE_LABELS[l.type] || l.type}</span></td>
-        <td>${l.quartier || '—'}</td>
-        <td style="font-family:monospace;font-size:11.5px;color:var(--text3)">${Number(l.lat).toFixed(5)}, ${Number(l.lng).toFixed(5)}</td>
-        <td style="font-size:12px;color:var(--text3)">
-          ${addedByAdmin ? addedLabel : '<span class="badge" style="font-size:10.5px">Catalogue</span>'}
-        </td>
-        <td>
-          <span class="badge ${disabled ? 'refused' : 'accepted'}" style="font-size:11px">
-            ${disabled ? '🔒 Désactivé' : '✓ Actif'}
-          </span>
-        </td>
-        <td>
-          <div class="action-btns">
-            <button class="icon-btn-sm" onclick='openLocationForm(${JSON.stringify(l)})' title="Modifier">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            </button>
-            <button class="icon-btn-sm ${disabled ? 'success' : 'warning'}" onclick="toggleLocation(${l.id}, ${disabled})" title="${disabled ? 'Activer' : 'Désactiver'}">
-              ${disabled
-                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
-                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>'}
-            </button>
-            ${addedByAdmin ? `
-            <button class="icon-btn-sm danger" onclick='deleteLocation(${l.id}, ${JSON.stringify(l.name || "")})' title="Supprimer">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-            </button>` : ''}
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
-  }
-
-  window.openLocationForm = function (location) {
-    $('loc-form-err').textContent = '';
-    const isEdit = !!(location && location.id);
-    $('location-form-title').textContent = isEdit ? 'Modifier le lieu' : 'Ajouter un lieu';
-    $('loc-id').value       = isEdit ? location.id : '';
-    $('loc-name').value     = isEdit ? location.name || '' : '';
-    $('loc-name-ar').value  = isEdit ? location.nameAr || '' : '';
-    $('loc-name-ha').value  = isEdit ? location.nameHa || '' : '';
-    $('loc-type').value     = isEdit ? location.type || 'autre' : 'autre';
-    $('loc-lat').value      = isEdit ? location.lat : '';
-    $('loc-lng').value      = isEdit ? location.lng : '';
-    $('loc-map-search').value = '';
-    $('loc-map-search-results').classList.add('hidden');
-
-    goSection('location-form');
-    setTimeout(() => {
-      _initLocMap(
-        isEdit ? Number(location.lat) : undefined,
-        isEdit ? Number(location.lng) : undefined
-      );
-    }, 60);
-  };
-
-  window.closeLocationForm = function () {
-    goSection('locations');
-  };
-
-  // ── Recherche d'adresse sur la carte du formulaire (Nominatim, gratuit) ──
-  let _locSearchTimer = null;
+  // Recherche d'adresse sur la carte du formulaire (Nominatim, gratuit).
   async function _searchLocationOnMap(query) {
     try {
       const r = await fetch(
@@ -560,16 +420,261 @@
     } catch (_) { return []; }
   }
 
-  function _wireLocMapSearch() {
-    const input = $('loc-map-search');
-    const box   = $('loc-map-search-results');
+  function _escLoc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  let _placeSearch    = '';
+  let _allPlaces      = [];
+  let _wilayasGeo     = [];  // [{id, name, moughataas:[{id,name}, ...]}, ...]
+  let _placeHaNames   = [];
+  let _placeMap       = null;
+  let _placeMarker    = null;
+  let _placeDetected  = null; // dernier résultat de /geo/detect (ou null)
+
+  async function _fetchWilayasGeo(force) {
+    if (_wilayasGeo.length && !force) return _wilayasGeo;
+    try {
+      const resp = await Auth.authFetch('/api/admin/geo/wilayas');
+      if (resp.ok) {
+        const data = await resp.json();
+        _wilayasGeo = data.data || [];
+      }
+    } catch (_) {}
+    return _wilayasGeo;
+  }
+
+  async function fetchPlaces() {
+    try {
+      const resp = await Auth.authFetch('/api/admin/lieux');
+      if (resp.ok) {
+        const data = await resp.json();
+        _allPlaces = data.data || [];
+        return;
+      }
+    } catch (_) {}
+    _allPlaces = [];
+  }
+
+  async function renderPlaces() {
+    await fetchPlaces();
+    const query = _placeSearch.toLowerCase();
+    const places = query
+      ? _allPlaces.filter(p =>
+          (p.nameFr || '').toLowerCase().includes(query) ||
+          (p.nameAr || '').includes(query) ||
+          (p.wilayaName || '').toLowerCase().includes(query) ||
+          (p.moughataaName || '').toLowerCase().includes(query))
+      : _allPlaces;
+
+    const tbody = $('places-body');
+    if (!tbody) return;
+
+    if (places.length === 0) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Aucun lieu trouvé. Ajoutez-en un avec le bouton ci-dessus.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = places.map(p => {
+      const disabled = !p.is_active;
+      return `
+      <tr class="${disabled ? 'row-blocked' : ''}">
+        <td>
+          <div style="font-weight:700;color:var(--text)">${p.nameFr || '—'}</div>
+          <div style="font-size:11px;color:var(--text3)" dir="rtl">${p.nameAr || ''}</div>
+        </td>
+        <td><span class="badge">${_PLACE_TYPE_LABELS[p.type] || p.type}</span></td>
+        <td>${p.wilayaName || '—'}</td>
+        <td>${p.moughataaName || '—'}</td>
+        <td style="font-family:monospace;font-size:11.5px;color:var(--text3)">${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}</td>
+        <td>
+          <span class="badge ${disabled ? 'refused' : 'accepted'}" style="font-size:11px">
+            ${disabled ? '🔒 Désactivé' : '✓ Actif'}
+          </span>
+        </td>
+        <td>
+          <div class="action-btns">
+            <button class="icon-btn-sm" onclick='openPlaceForm(${JSON.stringify(p)})' title="Modifier">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="icon-btn-sm ${disabled ? 'success' : 'warning'}" onclick="togglePlace(${p.id}, ${disabled})" title="${disabled ? 'Activer' : 'Désactiver'}">
+              ${disabled
+                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>'}
+            </button>
+            <button class="icon-btn-sm danger" onclick='deletePlace(${p.id}, ${JSON.stringify(p.nameFr || "")})' title="Supprimer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  function _populatePlaceWilayaSelect(selectedWilayaId) {
+    const sel = $('place-wilaya');
+    sel.innerHTML = '<option value="">— Choisir une wilaya —</option>' +
+      _wilayasGeo.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
+    if (selectedWilayaId) sel.value = String(selectedWilayaId);
+  }
+
+  function _populatePlaceMoughataaSelect(wilayaId, selectedMoughataaId) {
+    const sel = $('place-moughataa');
+    if (!wilayaId) {
+      sel.innerHTML = '<option value="">— Choisir d\'abord une wilaya —</option>';
+      sel.disabled = true;
+      return;
+    }
+    const w = _wilayasGeo.find(w => String(w.id) === String(wilayaId));
+    if (!w || !w.moughataas.length) {
+      sel.innerHTML = '<option value="">— Aucune moughataa —</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    sel.innerHTML = '<option value="">— Choisir une moughataa —</option>' +
+      w.moughataas.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+    if (selectedMoughataaId) sel.value = String(selectedMoughataaId);
+  }
+
+  window._onPlaceWilayaChange = function () {
+    const wilayaId = $('place-wilaya').value;
+    _populatePlaceMoughataaSelect(wilayaId);
+  };
+
+  function _renderPlaceHaChips() {
+    const box = $('place-ha-chips');
+    box.innerHTML = _placeHaNames.map((n, i) => `
+      <span class="ha-chip">${_escLoc(n)}<button type="button" onclick="removePlaceHaName(${i})" title="Retirer">×</button></span>
+    `).join('');
+  }
+
+  window.addPlaceHaName = function () {
+    const input = $('place-name-ha-input');
+    const name = input.value.trim();
+    if (!name) return;
+    _placeHaNames.push(name);
+    input.value = '';
+    _renderPlaceHaChips();
+  };
+
+  window.removePlaceHaName = function (i) {
+    _placeHaNames.splice(i, 1);
+    _renderPlaceHaChips();
+  };
+
+  // ── Validation automatique GPS <-> Wilaya/Moughataa ────────────────
+  // Déclenchée à chaque nouveau point choisi par l'admin (clic/glissé sur
+  // la carte, résultat de recherche, saisie manuelle des coordonnées) --
+  // jamais au chargement initial du formulaire en édition (coordonnées
+  // déjà enregistrées, pas un nouveau choix de l'admin).
+  function _hideGeoWarning() {
+    $('place-geo-warning').style.display = 'none';
+  }
+
+  async function _detectGeoForCurrentCoords() {
+    const lat = parseFloat($('place-lat').value);
+    const lng = parseFloat($('place-lng').value);
+    if (isNaN(lat) || isNaN(lng)) { _placeDetected = null; _hideGeoWarning(); return; }
+
+    let detected = null;
+    try {
+      const resp = await Auth.authFetch(`/api/admin/geo/detect?lat=${lat}&lng=${lng}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        detected = data.data || null;
+      }
+    } catch (_) {}
+    _placeDetected = detected;
+    if (!detected) { _hideGeoWarning(); return; }
+
+    const selectedWilaya    = $('place-wilaya').value;
+    const selectedMoughataa = $('place-moughataa').value;
+
+    if (!selectedWilaya || !selectedMoughataa) {
+      // Rien choisi encore -> remplissage automatique silencieux.
+      _populatePlaceWilayaSelect(detected.wilayaId);
+      _populatePlaceMoughataaSelect(detected.wilayaId, detected.moughataaId);
+      _hideGeoWarning();
+      return;
+    }
+
+    if (String(selectedMoughataa) === String(detected.moughataaId)) {
+      _hideGeoWarning();
+      return;
+    }
+
+    // Une Wilaya/Moughataa était déjà choisie et ne correspond pas au
+    // point GPS -> avertir et laisser l'admin décider.
+    $('place-geo-detected-label').textContent = `${detected.wilayaName} / ${detected.moughataaName}`;
+    $('place-geo-warning').style.display = 'flex';
+  }
+
+  window.applyDetectedGeo = function () {
+    if (!_placeDetected) return;
+    _populatePlaceWilayaSelect(_placeDetected.wilayaId);
+    _populatePlaceMoughataaSelect(_placeDetected.wilayaId, _placeDetected.moughataaId);
+    _hideGeoWarning();
+  };
+
+  window.dismissGeoWarning = function () {
+    _hideGeoWarning();
+  };
+
+  function _initPlaceMap(lat, lng) {
+    if (typeof L === 'undefined') return;
+    const center = (typeof lat === 'number' && typeof lng === 'number') ? [lat, lng] : _NKC_CENTER;
+
+    if (!_placeMap) {
+      _placeMap = L.map('place-map', { zoomControl: true }).setView(center, 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18, attribution: '© OpenStreetMap',
+      }).addTo(_placeMap);
+      _placeMap.on('click', (e) => _setPlaceMarker(e.latlng.lat, e.latlng.lng));
+    } else {
+      _placeMap.setView(center, _placeMarker ? 15 : 14);
+      setTimeout(() => _placeMap.invalidateSize(), 150);
+    }
+
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      _setPlaceMarker(lat, lng, /*skipInputs*/ true);
+    } else if (_placeMarker) {
+      _placeMap.removeLayer(_placeMarker);
+      _placeMarker = null;
+    }
+  }
+
+  function _setPlaceMarker(lat, lng, skipInputs) {
+    if (!_placeMap) return;
+    if (_placeMarker) {
+      _placeMarker.setLatLng([lat, lng]);
+    } else {
+      _placeMarker = L.marker([lat, lng], { draggable: true }).addTo(_placeMap);
+      _placeMarker.on('dragend', () => {
+        const p = _placeMarker.getLatLng();
+        $('place-lat').value = p.lat.toFixed(8);
+        $('place-lng').value = p.lng.toFixed(8);
+        _detectGeoForCurrentCoords(); // async ok
+      });
+    }
+    if (!skipInputs) {
+      $('place-lat').value = lat.toFixed(8);
+      $('place-lng').value = lng.toFixed(8);
+      _detectGeoForCurrentCoords(); // async ok
+    }
+  }
+
+  function _wirePlaceMapSearch() {
+    const input = $('place-map-search');
+    const box   = $('place-map-search-results');
     if (!input || !box) return;
 
+    let timer = null;
     input.addEventListener('input', () => {
-      clearTimeout(_locSearchTimer);
+      clearTimeout(timer);
       const q = input.value.trim();
       if (q.length < 3) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-      _locSearchTimer = setTimeout(async () => {
+      timer = setTimeout(async () => {
         const results = await _searchLocationOnMap(q);
         if (!results.length) { box.innerHTML = '<div class="loc-map-search-item">Aucun résultat.</div>'; box.classList.remove('hidden'); return; }
         box.innerHTML = results.map((r, i) => `<div class="loc-map-search-item" data-i="${i}">${_escLoc(r.display_name)}</div>`).join('');
@@ -584,82 +689,284 @@
       const r = box._results[Number(item.dataset.i)];
       if (!r) return;
       const lat = parseFloat(r.lat), lng = parseFloat(r.lon);
-      _setLocMarker(lat, lng);
-      if (_locMap) _locMap.setView([lat, lng], 16);
+      _setPlaceMarker(lat, lng);
+      if (_placeMap) _placeMap.setView([lat, lng], 16);
       box.classList.add('hidden');
     });
 
     input.addEventListener('blur', () => setTimeout(() => box.classList.add('hidden'), 220));
   }
 
-  function _escLoc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
+  window.openPlaceForm = async function (place) {
+    $('place-form-err').textContent = '';
+    const isEdit = !!(place && place.id);
+    $('place-form-title').textContent = isEdit ? 'Modifier le lieu' : 'Ajouter un lieu';
+    $('place-id').value      = isEdit ? place.id : '';
+    $('place-name-fr').value = isEdit ? place.nameFr || '' : '';
+    $('place-name-ar').value = isEdit ? place.nameAr || '' : '';
+    $('place-type').value    = isEdit ? place.type || 'autre' : 'autre';
+    $('place-lat').value     = isEdit ? place.lat : '';
+    $('place-lng').value     = isEdit ? place.lng : '';
+    $('place-map-search').value = '';
+    $('place-map-search-results').classList.add('hidden');
+    $('place-name-ha-input').value = '';
+    _placeHaNames = isEdit ? (place.namesHa || []).slice() : [];
+    _renderPlaceHaChips();
+    _placeDetected = null;
+    _hideGeoWarning();
 
-  window.saveLocationForm = async function () {
-    const errEl = $('loc-form-err');
+    await _fetchWilayasGeo();
+    _populatePlaceWilayaSelect(isEdit ? place.wilayaId : '');
+    _populatePlaceMoughataaSelect(isEdit ? place.wilayaId : '', isEdit ? place.moughataaId : '');
+
+    goSection('place-form');
+    setTimeout(() => {
+      _initPlaceMap(
+        isEdit ? Number(place.lat) : undefined,
+        isEdit ? Number(place.lng) : undefined
+      );
+    }, 60);
+  };
+
+  window.closePlaceForm = function () {
+    goSection('places');
+  };
+
+  window.savePlaceForm = async function () {
+    const errEl = $('place-form-err');
     errEl.textContent = '';
 
-    const id       = $('loc-id').value;
-    const name     = $('loc-name').value.trim();
-    const lat      = parseFloat($('loc-lat').value);
-    const lng      = parseFloat($('loc-lng').value);
+    const id           = $('place-id').value;
+    const nameFr       = $('place-name-fr').value.trim();
+    const nameAr       = $('place-name-ar').value.trim();
+    const moughataaId  = $('place-moughataa').value;
+    const lat          = parseFloat($('place-lat').value);
+    const lng          = parseFloat($('place-lng').value);
 
-    if (!name) { errEl.textContent = 'Le nom (français) est obligatoire.'; return; }
-    if (isNaN(lat) || isNaN(lng)) { errEl.textContent = 'Placez le lieu sur la carte (ou saisissez latitude/longitude).'; return; }
+    if (!$('place-wilaya').value)      { errEl.textContent = 'Choisissez une wilaya.'; return; }
+    if (!moughataaId)                  { errEl.textContent = 'Choisissez une moughataa.'; return; }
+    if (!nameAr)                        { errEl.textContent = 'Le nom en arabe est obligatoire.'; return; }
+    if (!nameFr)                        { errEl.textContent = 'Le nom en français est obligatoire.'; return; }
+    if (isNaN(lat) || isNaN(lng))       { errEl.textContent = 'Placez le lieu sur la carte (ou saisissez latitude/longitude).'; return; }
 
     const payload = {
-      name, lat, lng,
-      name_ar: $('loc-name-ar').value.trim(),
-      name_ha: $('loc-name-ha').value.trim(),
-      type:    $('loc-type').value,
+      moughataa_id: Number(moughataaId),
+      name_fr: nameFr,
+      name_ar: nameAr,
+      names_ha: _placeHaNames,
+      type: $('place-type').value,
+      lat, lng,
     };
 
     try {
-      const url    = id ? `/api/admin/locations/${id}` : '/api/admin/locations';
+      const url    = id ? `/api/admin/lieux/${id}` : '/api/admin/lieux';
       const method = id ? 'PUT' : 'POST';
       const resp   = await Auth.authFetch(url, { method, body: JSON.stringify(payload) });
       const data   = await resp.json();
       if (!resp.ok) { errEl.textContent = data.error || 'Erreur lors de l\'enregistrement.'; return; }
       toast(id ? 'Lieu mis à jour.' : 'Lieu créé.', 'success');
-      closeLocationForm();
-      renderLocations();
+      closePlaceForm();
+      renderPlaces();
     } catch (_) {
       errEl.textContent = 'Backend hors ligne — impossible d\'enregistrer.';
     }
   };
 
-  window.toggleLocation = function (id, currentlyDisabled) {
+  window.togglePlace = function (id, currentlyDisabled) {
     adminConfirm(
       currentlyDisabled ? '📍' : '🔒',
       currentlyDisabled ? 'Activer le lieu' : 'Désactiver le lieu',
       currentlyDisabled
-        ? 'Le chat pourra à nouveau proposer ce lieu.'
-        : 'Le chat ne proposera plus ce lieu (il reste dans l\'historique des courses passées).',
+        ? 'Ce lieu redevient disponible.'
+        : 'Ce lieu sera masqué (il reste modifiable et réactivable).',
       currentlyDisabled ? 'Activer' : 'Désactiver',
       currentlyDisabled ? 'warning-btn' : '',
       async () => {
         try {
-          const resp = await Auth.authFetch(`/api/admin/locations/${id}/toggle`, { method: 'PUT' });
-          if (resp.ok) { toast(currentlyDisabled ? 'Lieu activé.' : 'Lieu désactivé.', 'success'); renderLocations(); return; }
+          const resp = await Auth.authFetch(`/api/admin/lieux/${id}/toggle`, { method: 'PUT' });
+          if (resp.ok) { toast(currentlyDisabled ? 'Lieu activé.' : 'Lieu désactivé.', 'success'); renderPlaces(); return; }
         } catch (_) {}
         toast('Backend hors ligne — action impossible.', 'danger');
       });
   };
 
-  // Réservé aux lieux ajoutés par un admin (created_by non nul) -- le
-  // catalogue de base n'est jamais supprimable, seulement désactivable.
-  window.deleteLocation = function (id, name) {
+  window.deletePlace = function (id, name) {
     adminConfirm(
       '🗑️',
       'Supprimer le lieu',
-      `"${name}" sera définitivement supprimé et ne sera plus proposé par le chat. Cette action est irréversible.`,
+      `"${name}" sera définitivement supprimé. Cette action est irréversible.`,
       'Supprimer',
       'warning-btn',
       async () => {
         try {
-          const resp = await Auth.authFetch(`/api/admin/locations/${id}`, { method: 'DELETE' });
-          if (resp.ok) { toast('Lieu supprimé.', 'success'); renderLocations(); return; }
+          const resp = await Auth.authFetch(`/api/admin/lieux/${id}`, { method: 'DELETE' });
+          if (resp.ok) { toast('Lieu supprimé.', 'success'); renderPlaces(); return; }
+          const data = await resp.json().catch(() => ({}));
+          toast(data.error || 'Suppression impossible.', 'danger');
+        } catch (_) {
+          toast('Backend hors ligne — action impossible.', 'danger');
+        }
+      });
+  };
+
+  // ── WILAYAS & MOUGHATAAS (gestion de la hiérarchie) ────────────────
+  // Permet d'ajouter/modifier/supprimer des wilayas et des moughataas
+  // (et de déplacer une moughataa vers une autre wilaya), pour alimenter
+  // la Base des lieux ci-dessus. Une wilaya/moughataa non vide ne peut
+  // pas être supprimée (contrôle serveur + bouton désactivé côté client).
+
+  async function renderGeo() {
+    await _fetchWilayasGeo(/*force*/ true);
+    const box = $('geo-wilayas-list');
+    if (!box) return;
+
+    if (!_wilayasGeo.length) {
+      box.innerHTML = '<div class="table-card"><div style="padding:20px;color:var(--text3);font-size:13px;">Aucune wilaya. Ajoutez-en une avec le bouton ci-dessus.</div></div>';
+      return;
+    }
+
+    box.innerHTML = _wilayasGeo.map(w => {
+      const wCount = w.moughataasCount || 0;
+      const wDeleteDisabled = wCount > 0;
+      return `
+      <div class="table-card" style="margin-bottom:16px;">
+        <div class="table-header">
+          <h3>${_escLoc(w.name)}${w.nameAr ? ` <span style="font-size:11px;color:var(--text3);font-weight:500;" dir="rtl">${_escLoc(w.nameAr)}</span>` : ''}</h3>
+          <div class="table-header-right" style="gap:8px;">
+            <button class="btn-sm primary" onclick='openGeoModal("moughataa", null, ${w.id})'>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Ajouter une moughataa
+            </button>
+            <button class="icon-btn-sm" onclick='openGeoModal("wilaya", ${JSON.stringify({id: w.id, name: w.name, nameAr: w.nameAr})})' title="Modifier">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="icon-btn-sm ${wDeleteDisabled ? '' : 'danger'}" ${wDeleteDisabled ? 'disabled style="opacity:.4;cursor:not-allowed;"' : `onclick='deleteGeoWilaya(${w.id}, ${JSON.stringify(w.name)})'`} title="${wDeleteDisabled ? `Contient ${wCount} moughataa(s) — videz-la d'abord` : 'Supprimer'}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Moughataa</th><th>Arabe</th><th>Lieux</th><th>Actions</th></tr></thead>
+          <tbody>
+            ${w.moughataas.length ? w.moughataas.map(m => {
+              const mDeleteDisabled = (m.lieuxCount || 0) > 0;
+              return `
+              <tr>
+                <td style="font-weight:600;">${_escLoc(m.name)}</td>
+                <td dir="rtl" style="color:var(--text3);">${_escLoc(m.nameAr || '')}</td>
+                <td><span class="badge">${m.lieuxCount || 0}</span></td>
+                <td>
+                  <div class="action-btns">
+                    <button class="icon-btn-sm" onclick='openGeoModal("moughataa", ${JSON.stringify({id: m.id, name: m.name, nameAr: m.nameAr, wilayaId: w.id})})' title="Modifier">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button class="icon-btn-sm ${mDeleteDisabled ? '' : 'danger'}" ${mDeleteDisabled ? 'disabled style="opacity:.4;cursor:not-allowed;"' : `onclick='deleteGeoMoughataa(${m.id}, ${JSON.stringify(m.name)})'`} title="${mDeleteDisabled ? `Contient ${m.lieuxCount} lieu(x) — déplacez/supprimez-les d'abord` : 'Supprimer'}">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('') : '<tr class="empty-row"><td colspan="4">Aucune moughataa dans cette wilaya.</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+    }).join('');
+  }
+
+  window.openGeoModal = async function (kind, entity, wilayaIdForNewMoughataa) {
+    await _fetchWilayasGeo();
+    const isEdit = !!(entity && entity.id);
+
+    $('geo-modal-kind').value = kind;
+    $('geo-modal-id').value   = isEdit ? entity.id : '';
+    $('geo-modal-name').value    = isEdit ? entity.name || '' : '';
+    $('geo-modal-name-ar').value = isEdit ? entity.nameAr || '' : '';
+    $('geo-modal-err').textContent = '';
+
+    const wilayaRow = $('geo-modal-wilaya-row');
+    if (kind === 'moughataa') {
+      wilayaRow.style.display = '';
+      const sel = $('geo-modal-wilaya-select');
+      sel.innerHTML = _wilayasGeo.map(w => `<option value="${w.id}">${_escLoc(w.name)}</option>`).join('');
+      const preselect = isEdit ? entity.wilayaId : wilayaIdForNewMoughataa;
+      if (preselect) sel.value = String(preselect);
+      $('geo-modal-title').textContent = isEdit ? 'Modifier la moughataa' : 'Ajouter une moughataa';
+    } else {
+      wilayaRow.style.display = 'none';
+      $('geo-modal-title').textContent = isEdit ? 'Modifier la wilaya' : 'Ajouter une wilaya';
+    }
+
+    $('geo-modal-overlay').classList.remove('hidden');
+  };
+
+  window.closeGeoModal = function () {
+    $('geo-modal-overlay').classList.add('hidden');
+  };
+
+  window.saveGeoModal = async function () {
+    const errEl = $('geo-modal-err');
+    errEl.textContent = '';
+
+    const kind = $('geo-modal-kind').value;
+    const id   = $('geo-modal-id').value;
+    const name = $('geo-modal-name').value.trim();
+    const nameAr = $('geo-modal-name-ar').value.trim();
+
+    if (!name) { errEl.textContent = 'Le nom (français) est obligatoire.'; return; }
+
+    let url, payload;
+    if (kind === 'moughataa') {
+      const wilayaId = $('geo-modal-wilaya-select').value;
+      if (!wilayaId) { errEl.textContent = 'Choisissez une wilaya.'; return; }
+      payload = { name, name_ar: nameAr, wilaya_id: Number(wilayaId) };
+      url = id ? `/api/admin/geo/moughataas/${id}` : '/api/admin/geo/moughataas';
+    } else {
+      payload = { name, name_ar: nameAr };
+      url = id ? `/api/admin/geo/wilayas/${id}` : '/api/admin/geo/wilayas';
+    }
+
+    try {
+      const resp = await Auth.authFetch(url, { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      const data = await resp.json();
+      if (!resp.ok) { errEl.textContent = data.error || 'Erreur lors de l\'enregistrement.'; return; }
+      toast(id ? 'Enregistré.' : 'Ajouté.', 'success');
+      closeGeoModal();
+      renderGeo();
+    } catch (_) {
+      errEl.textContent = 'Backend hors ligne — impossible d\'enregistrer.';
+    }
+  };
+
+  window.deleteGeoWilaya = function (id, name) {
+    adminConfirm(
+      '🗑️',
+      'Supprimer la wilaya',
+      `"${name}" sera définitivement supprimée. Cette action est irréversible.`,
+      'Supprimer',
+      'warning-btn',
+      async () => {
+        try {
+          const resp = await Auth.authFetch(`/api/admin/geo/wilayas/${id}`, { method: 'DELETE' });
+          if (resp.ok) { toast('Wilaya supprimée.', 'success'); renderGeo(); return; }
+          const data = await resp.json().catch(() => ({}));
+          toast(data.error || 'Suppression impossible.', 'danger');
+        } catch (_) {
+          toast('Backend hors ligne — action impossible.', 'danger');
+        }
+      });
+  };
+
+  window.deleteGeoMoughataa = function (id, name) {
+    adminConfirm(
+      '🗑️',
+      'Supprimer la moughataa',
+      `"${name}" sera définitivement supprimée. Cette action est irréversible.`,
+      'Supprimer',
+      'warning-btn',
+      async () => {
+        try {
+          const resp = await Auth.authFetch(`/api/admin/geo/moughataas/${id}`, { method: 'DELETE' });
+          if (resp.ok) { toast('Moughataa supprimée.', 'success'); renderGeo(); return; }
           const data = await resp.json().catch(() => ({}));
           toast(data.error || 'Suppression impossible.', 'danger');
         } catch (_) {
@@ -853,7 +1160,7 @@
 
     if (cat === 'llm') return `
       <p style="font-size:12.5px;color:var(--text3);margin:-4px 0 4px;">
-        Seul "Google Gemini" est aujourd'hui réellement branché : le sélectionner active de vrais appels vers l'API Gemini pour la compréhension du langage (le moteur de réservation, lui, reste toujours 100% géré par NaqlaBot). Les autres fournisseurs listés ci-dessous n'ont pas encore d'adaptateur côté serveur — les sélectionner fera échouer chaque appel et le chat retombera automatiquement sur "Rules".
+        Seul "Google Gemini" est aujourd'hui réellement branché : le sélectionner active de vrais appels vers l'API Gemini pour la compréhension du langage (le moteur de réservation, lui, reste toujours 100% géré par ChatIA). Les autres fournisseurs listés ci-dessous n'ont pas encore d'adaptateur côté serveur — les sélectionner fera échouer chaque appel et le chat retombera automatiquement sur "Rules".
       </p>
 
       <div class="sub-panel-section">
@@ -899,7 +1206,7 @@
 
       <div class="sub-panel-section">
         <div class="sub-panel-section-label">Prompt système</div>
-        <textarea class="setting-input" id="llm-system-prompt" rows="5" placeholder="ex: Tu es l'assistant transport de NaqlaBot à Nouakchott. Tu aides uniquement à identifier un départ, une destination et à réserver une course..."></textarea>
+        <textarea class="setting-input" id="llm-system-prompt" rows="5" placeholder="ex: Tu es l'assistant transport de ChatIA à Nouakchott. Tu aides uniquement à identifier un départ, une destination et à réserver une course..."></textarea>
         <div class="sub-panel-hint">Instructions envoyées au LLM avant chaque conversation.</div>
       </div>
 
@@ -1167,7 +1474,7 @@
       'Cette action supprimera définitivement toutes les courses. Irréversible.',
       'Effacer tout', '',
       () => {
-        localStorage.removeItem('naqlabot_requests');
+        localStorage.removeItem('chatia_requests');
         toast('Données courses supprimées.', 'danger');
         renderDashboard();
         renderRequests();
@@ -1182,19 +1489,24 @@
 
   bindSearch('user-search', function (v) { _userSearch = v; renderUsers(); /* async ok */ });
   bindSearch('req-search',  function (v) { _reqSearch  = v; renderRequests(); });
-  bindSearch('location-search', function (v) { _locSearch = v; renderLocations(); /* async ok */ });
-  _wireLocMapSearch();
 
-  // Saisie manuelle lat/lng -> déplace aussi le marqueur sur la carte.
-  ['loc-lat', 'loc-lng'].forEach(id => {
+  bindSearch('place-search', function (v) { _placeSearch = v; renderPlaces(); /* async ok */ });
+  _wirePlaceMapSearch();
+
+  ['place-lat', 'place-lng'].forEach(id => {
     $(id)?.addEventListener('change', () => {
-      const lat = parseFloat($('loc-lat').value);
-      const lng = parseFloat($('loc-lng').value);
-      if (!isNaN(lat) && !isNaN(lng) && _locMap) {
-        _setLocMarker(lat, lng, /*skipInputs*/ true);
-        _locMap.setView([lat, lng], 15);
+      const lat = parseFloat($('place-lat').value);
+      const lng = parseFloat($('place-lng').value);
+      if (!isNaN(lat) && !isNaN(lng) && _placeMap) {
+        _setPlaceMarker(lat, lng, /*skipInputs*/ true);
+        _placeMap.setView([lat, lng], 15);
+        _detectGeoForCurrentCoords(); // async ok -- saisie manuelle des coordonnées
       }
     });
+  });
+
+  $('place-name-ha-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addPlaceHaName(); }
   });
 
   // ── Logout ──────────────────────────────────────────────────────

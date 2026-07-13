@@ -124,7 +124,7 @@ const MockData = (() => {
   }
 
   function getHistory() {
-    const stored = localStorage.getItem('naqlabot_history');
+    const stored = localStorage.getItem('chatia_history');
     if (stored) {
       try { return JSON.parse(stored); } catch { return HISTORY_CONVERSATIONS; }
     }
@@ -132,11 +132,11 @@ const MockData = (() => {
   }
 
   function saveHistory(history) {
-    localStorage.setItem('naqlabot_history', JSON.stringify(history));
+    localStorage.setItem('chatia_history', JSON.stringify(history));
   }
 
   function getRequests() {
-    const stored = localStorage.getItem('naqlabot_requests');
+    const stored = localStorage.getItem('chatia_requests');
     if (stored) {
       try { return JSON.parse(stored); } catch { return []; }
     }
@@ -144,7 +144,7 @@ const MockData = (() => {
   }
 
   function saveRequests(requests) {
-    localStorage.setItem('naqlabot_requests', JSON.stringify(requests));
+    localStorage.setItem('chatia_requests', JSON.stringify(requests));
   }
 
   // Simulate driver search result (80% chance of finding a driver)

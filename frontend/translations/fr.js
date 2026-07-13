@@ -99,6 +99,14 @@ window.LANG_FR = {
     'Voici ce que je peux faire pour vous :\n• Réserver un transport\n• Vérifier le statut de votre demande\n• Annuler une demande en cours\n• Consulter l\'historique de vos trajets',
   'ai.unknown':
     'Je n\'ai pas bien compris votre demande. Vous pouvez dire par exemple : "Je veux un transport", ou utilisez les boutons ci-dessous.',
+
+  // ── IA connectée (OpenAI) — notification discrète + indicateur de connexion ──
+  'ai.fallback.notice':
+    'Connexion IA indisponible — retour au mode local.',
+  'ai.status.online':
+    'IA connectée',
+  'ai.status.offline':
+    'Mode hors ligne',
   'ai.no.driver':
     'Désolé, aucun chauffeur n\'est disponible en ce moment. Veuillez réessayer dans quelques minutes.',
 

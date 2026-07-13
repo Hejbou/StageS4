@@ -574,6 +574,23 @@ tbody td {
   .location-form-map-col { position: static; }
 }
 
+/* ── Hassaniya multi-name chips (Base des lieux) ─────────────────── */
+.ha-chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.ha-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--p-bg); border: 1px solid var(--border);
+  border-radius: 20px; padding: 6px 8px 6px 14px;
+  font-size: 13px; color: var(--text); direction: rtl;
+}
+.ha-chip button {
+  width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--border); color: var(--text3); border: none;
+  cursor: pointer; font-size: 13px; line-height: 1; font-family: inherit;
+  transition: all .15s;
+}
+.ha-chip button:hover { background: var(--danger); color: white; }
+
 /* ── Phrase Editor ──────────────────────────────────────────────── */
 .phrase-block {
   background: var(--bg);

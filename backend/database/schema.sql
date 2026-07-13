@@ -165,6 +165,89 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 
 -- ───────────────────────────────────────────────────────────────────
+--  HIÉRARCHIE GÉOGRAPHIQUE — Ville -> Wilaya -> Moughataa -> Lieu
+--  Nouveau système de gestion des lieux (espace admin), indépendant de
+--  `locations` (`quartier`, `lat`, `lng`, etc., inchangée) qui reste la
+--  seule source utilisée par le chat, le calcul du prix et la carte.
+--  Une seule ville existe aujourd'hui (Nouakchott) ; la structure est
+--  prête à en accueillir d'autres.
+-- ───────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS cities (
+    id          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(100)  NOT NULL,
+    name_ar     VARCHAR(100)  NULL,
+    name_ha     VARCHAR(100)  NULL,
+    created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_city_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Ville — racine de la hiérarchie géographique des lieux';
+
+CREATE TABLE IF NOT EXISTS wilayas (
+    id          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    city_id     INT UNSIGNED  NOT NULL,
+    name        VARCHAR(100)  NOT NULL,
+    name_ar     VARCHAR(100)  NULL,
+    name_ha     VARCHAR(100)  NULL,
+    created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    CONSTRAINT fk_wilaya_city FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE CASCADE,
+    INDEX idx_wilaya_city (city_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Wilaya — subdivision d''une Ville';
+
+CREATE TABLE IF NOT EXISTS moughataas (
+    id          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    wilaya_id   INT UNSIGNED  NOT NULL,
+    name        VARCHAR(100)  NOT NULL,
+    name_ar     VARCHAR(100)  NULL,
+    name_ha     VARCHAR(100)  NULL,
+    lat         DECIMAL(10,8) NULL COMMENT 'Centroïde approximatif -- détection GPS <-> hiérarchie dans le formulaire Lieu',
+    lng         DECIMAL(11,8) NULL COMMENT 'Centroïde approximatif -- détection GPS <-> hiérarchie dans le formulaire Lieu',
+    created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    CONSTRAINT fk_moughataa_wilaya FOREIGN KEY (wilaya_id) REFERENCES wilayas(id) ON DELETE CASCADE,
+    INDEX idx_moughataa_wilaya (wilaya_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Moughataa — subdivision d''une Wilaya, parent direct des Lieux';
+
+-- ───────────────────────────────────────────────────────────────────
+--  LIEUX (nouvelle hiérarchie) — saisis depuis la gestion "Lieux" de
+--  l'espace admin. Indépendante de `locations` (catalogue historique
+--  utilisé par le chat/le calcul du prix/la carte) : coexistence
+--  volontaire tant que le chat n'a pas basculé sur cette table.
+-- ───────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS lieux (
+    id            INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    moughataa_id  INT UNSIGNED  NOT NULL,
+    name_fr       VARCHAR(150)  NOT NULL COMMENT 'Nom en français',
+    name_ar       VARCHAR(150)  NOT NULL COMMENT 'Nom en arabe',
+    names_ha      JSON          NULL     COMMENT 'Liste de noms en hassaniya (0..n)',
+    type          ENUM('quartier','marche','hopital','clinique','mosquee','ecole','universite','carrefour','station','admin','hotel','autre')
+                  NOT NULL DEFAULT 'autre',
+    lat           DECIMAL(10,8) NOT NULL,
+    lng           DECIMAL(11,8) NOT NULL,
+    is_active     BOOLEAN       NOT NULL DEFAULT TRUE,
+    created_by    VARCHAR(8)    NULL     COMMENT 'Téléphone de l''admin qui a créé le lieu',
+    created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    CONSTRAINT fk_lieu_moughataa FOREIGN KEY (moughataa_id) REFERENCES moughataas(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_lieu_creator   FOREIGN KEY (created_by) REFERENCES users(phone) ON DELETE SET NULL,
+    INDEX idx_lieu_moughataa (moughataa_id),
+    INDEX idx_lieu_active    (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Lieux (nouvelle hiérarchie Ville/Wilaya/Moughataa) — gestion admin';
+
+
+-- ───────────────────────────────────────────────────────────────────
 --  LIEUX (POI) — source unique pour le chat IA ET le géocodage backend
 --  Remplace le fichier statique frontend/js/poi-db.js et le
 --  dictionnaire Python _NOUAKCHOTT_ZONES (jusque-là non synchronisés).

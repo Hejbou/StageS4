@@ -45,6 +45,7 @@ const Chat = (() => {
   let _autoDest        = null;   // destination extraite en même temps que l'origine dans un même message ("de X à Y") — validée automatiquement une fois l'origine résolue
   let _matchCandidate  = null;   // { target, place, lang, returnState } — correspondance approximative en attente de confirmation oui/non
   let _lastLang        = 'fr';   // dernière langue détectée dans un message utilisateur (pas la langue de l'interface) — utilisée par les clics sur les cartes (confirmer/annuler), qui n'ont pas de texte à eux-mêmes détecter
+  let _aiOfflineNotified = false; // évite de re-notifier à chaque message tant que l'IA reste indisponible (voir _tryAIReply)
   let messages       = [];
   let typingTimer    = null;
   let _currentMode   = 'chat'; // 'chat' | 'call'
@@ -270,9 +271,16 @@ const Chat = (() => {
             if (_onSpokenCb) { const cb = _onSpokenCb; _onSpokenCb = null; cb(); }
             resolve();
           });
-        } else if (_lastTurnWasVoice) {
-          // Message tapé via le micro (mode chat) : parlé aussi, sans
-          // callback de reprise d'écoute (pas de cycle d'appel ici).
+        } else if (_lastTurnWasVoice && typeof TTSController === 'undefined') {
+          // Message vocal (mic, mode chat) : parlé ici SEULEMENT si le
+          // module de conversation vocale complète d'un autre contributeur
+          // (frontend/js/voice-conversation.js + tts/tts_controller.js)
+          // n'est pas chargé — sinon CE module gère déjà lui-même la
+          // lecture de "la prochaine réponse IA" via
+          // TTSController.speakNextReply(), et parler ici EN PLUS
+          // ferait entendre la même réponse deux fois. Voir rapport de
+          // merge : les deux systèmes ciblent le même besoin, celui-ci
+          // reste le filet de secours si l'autre est absent/désactivé.
           Voice.speak(text, lang, () => resolve());
         } else {
           resolve();
@@ -1474,6 +1482,59 @@ const Chat = (() => {
     await _aiReply(_t('ai.unknown', lang), lang);
   }
 
+  // ── Intégration OpenAI (app/ai/ + routes/ai_chat.py côté backend) ──
+  // Développée en parallèle de _dispatchViaDecide ci-dessus par un autre
+  // contributeur — même objectif (répondre intelligemment à un message
+  // "libre" hors métier) via un système différent (OpenAI direct, plutôt
+  // que le provider configurable NLU.decideNext/generateReply). CONSERVÉE
+  // TELLE QUELLE (rien supprimé) mais PAS câblée dans processInput() —
+  // voir le commentaire "NON CÂBLÉ" plus bas : les deux systèmes
+  // couvrent le même cas (IDLE + message libre) de façon incompatible
+  // dans le flux actuel, une décision explicite est nécessaire avant de
+  // les faire cohabiter (voir rapport de merge).
+  //
+  // Utilisée UNIQUEMENT pour les messages "libres" (salutations, aide
+  // générale, questions hors métier) — jamais pour la réservation, le
+  // suivi, l'annulation ou la confirmation, qui continuent d'être gérés
+  // en dur par la machine à états ci-dessus, que l'IA soit disponible ou
+  // non (voir AI_ELIGIBLE_INTENTS ci-dessous).
+  function _setSendEnabled(enabled) {
+    const sendBtn = document.getElementById('send-btn');
+    if (sendBtn) sendBtn.disabled = !enabled;
+  }
+
+  // Tente une réponse via OpenAI pour un message hors métier. Retourne
+  // `true` si l'IA a répondu (message déjà affiché) — le code appelant ne
+  // doit alors rien faire de plus. Retourne `false` si l'IA est
+  // indisponible (timeout, réseau, erreur serveur) : le code appelant
+  // doit alors continuer normalement vers le moteur de règles, exactement
+  // comme si cette tentative n'avait jamais eu lieu (repli silencieux,
+  // seule une petite notification discrète prévient l'utilisateur).
+  async function _tryAIReply(text, lang) {
+    _setSendEnabled(false);
+    _showTyping();
+
+    const result = await AIChatClient.sendMessage(text, lang);
+
+    _setSendEnabled(true);
+
+    if (!result.ok) {
+      _hideTyping();
+      if (!_aiOfflineNotified) {
+        _aiOfflineNotified = true;
+        Notifications.toast(_t('ai.fallback.notice', lang), 'warning', 3000);
+      }
+      return false;
+    }
+
+    _aiOfflineNotified = false;
+    // delay=0 : l'attente réseau réelle a déjà servi de "temps de réflexion" ;
+    // _aiReply gère l'affichage (bulle, avatar, heure) exactement comme pour
+    // le moteur de règles, donc aucun changement visuel/design.
+    await _aiReply(result.data.response, lang, 0);
+    return true;
+  }
+
   // ── Main processInput — called by Chat UI and Call mode ─────────
   // options: { mode: 'chat'|'call', onSpoken: callback }
   async function processInput(text, options = {}) {
@@ -1512,6 +1573,30 @@ const Chat = (() => {
     }
 
     const intent = await NLU.detectIntent(text, _buildNluContext(lang));
+
+    // ── NON CÂBLÉ (fusion Git — décision en attente, voir rapport de merge) ──
+    // Repli OpenAI d'un autre contributeur (_tryAIReply, voir plus haut),
+    // pensé pour intercepter les messages IDLE "libres" avant le moteur de
+    // règles. Volontairement laissé tel quel plutôt que supprimé : le bloc
+    // ci-dessous ne s'exécutera jamais dans l'état actuel du fichier
+    // (IDLE retourne toujours plus haut via _dispatchViaDecide avant
+    // d'atteindre ce point), donc `aiEligible` sera toujours faux — aucun
+    // changement de comportement, aucun risque. Si l'un des deux systèmes
+    // doit devenir la voie principale pour les messages IDLE hors métier,
+    // ce point d'insertion doit être revu explicitement (ne pas réactiver
+    // sans décision : les deux passent par des fournisseurs LLM différents
+    // et incompatibles tels quels).
+    const AI_ELIGIBLE_INTENTS = ['GREET', 'HELP', 'UNKNOWN'];
+    const aiEligible = _currentMode === 'chat'
+      && state === STATE.IDLE
+      && AI_ELIGIBLE_INTENTS.includes(intent)
+      && typeof AIChatClient !== 'undefined';
+
+    if (aiEligible) {
+      const handledByAI = await _tryAIReply(text, lang);
+      if (handledByAI) return;
+      // Sinon : repli silencieux, on continue vers le moteur de règles.
+    }
 
     // ── Global intent override ─────────────────────────────────────
     // CANCEL_TRIP / STATUS / HELP / HISTORY / MAP always interrupt any
@@ -2018,6 +2103,11 @@ const Chat = (() => {
     }
 
     _attachCardListeners();
+
+    // Démarre le suivi de connexion IA (met à jour l'indicateur "IA
+    // connectée" / "Mode hors ligne" dans l'en-tête) — n'affecte en rien
+    // le reste de l'init si AIChatClient n'est pas chargé.
+    if (typeof AIChatClient !== 'undefined') AIChatClient.startHealthMonitor();
   }
 
   function _sendFromInput() {
@@ -2047,6 +2137,9 @@ const Chat = (() => {
     _onSpokenCb     = null;
     Maps.hideSuggestions();
     Maps.destroyMap();
+    // Nouvelle conversation IA (historique côté backend repart de zéro,
+    // voir ConversationMemory) — cohérent avec la remise à zéro de state.
+    if (typeof AIChatClient !== 'undefined') AIChatClient.resetConversation();
   }
 
   // Cancel any in-progress AI reply (called by Call.end() to stop ghost responses)

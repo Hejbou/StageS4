@@ -59,11 +59,18 @@
       <span>Courses</span>
     </a>
 
-    <a class="nav-link" id="nav-locations" onclick="goSection('locations')">
+    <a class="nav-link" id="nav-places" onclick="goSection('places')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+        <path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.1-2.8-2.8L7 14"/>
       </svg>
-      <span>Lieux</span>
+      <span>Base des lieux</span>
+    </a>
+
+    <a class="nav-link" id="nav-geo" onclick="goSection('geo')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
+      </svg>
+      <span>Wilayas &amp; Moughataas</span>
     </a>
 
     <a class="nav-link" id="nav-settings" onclick="goSection('settings')">
@@ -256,24 +263,24 @@
       </div>
     </div>
 
-    <!-- ── LIEUX (POI) ── -->
-    <div id="section-locations" class="section">
+    <!-- ── BASE DES LIEUX (Ville -> Wilaya -> Moughataa -> Lieu) ── -->
+    <div id="section-places" class="section">
       <h2 class="section-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+          <path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.1-2.8-2.8L7 14"/>
         </svg>
-        Lieux du chat IA
+        Base des lieux
       </h2>
       <p style="font-size:12.5px;color:var(--text3);margin:-8px 0 16px;">
-        Ces lieux sont utilisés par le chat pour la précision de localisation (départ et destination). Un lieu désactivé n'est plus proposé mais reste dans l'historique des courses passées.
+        Nouvelle hiérarchie Ville → Wilaya → Moughataa → Lieu, indépendante des « Lieux » du chat IA ci-dessus.
       </p>
 
       <div class="table-card">
         <div class="table-header">
           <h3>Tous les lieux</h3>
           <div class="table-header-right">
-            <input type="text" class="search-input" id="location-search" placeholder="Rechercher…">
-            <button class="btn-sm primary" onclick="openLocationForm()">
+            <input type="text" class="search-input" id="place-search" placeholder="Rechercher…">
+            <button class="btn-sm primary" onclick="openPlaceForm()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Ajouter un lieu
             </button>
@@ -281,71 +288,103 @@
         </div>
         <table>
           <thead>
-            <tr><th>Nom</th><th>Type</th><th>Quartier</th><th>Coordonnées</th><th>Ajouté le</th><th>Statut</th><th>Actions</th></tr>
+            <tr><th>Nom</th><th>Type</th><th>Wilaya</th><th>Moughataa</th><th>Coordonnées</th><th>Statut</th><th>Actions</th></tr>
           </thead>
-          <tbody id="locations-body">
+          <tbody id="places-body">
             <tr class="empty-row"><td colspan="7">Chargement…</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- ── LOCATION FORM (page dédiée, plein écran) ── -->
-    <div id="section-location-form" class="section">
+    <!-- ── PLACE FORM (page dédiée, plein écran) ── -->
+    <div id="section-place-form" class="section">
       <div class="sub-panel-header" style="margin:-8px -8px 20px;">
-        <button class="sub-panel-back" onclick="closeLocationForm()">
+        <button class="sub-panel-back" onclick="closePlaceForm()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          Retour aux lieux
+          Retour à la base des lieux
         </button>
-        <div class="sub-panel-title" id="location-form-title">Ajouter un lieu</div>
+        <div class="sub-panel-title" id="place-form-title">Ajouter un lieu</div>
       </div>
 
       <div class="location-form-grid">
         <div class="location-form-fields">
-          <input type="hidden" id="loc-id">
+          <input type="hidden" id="place-id">
 
           <div class="sub-panel-section">
-            <div class="sub-panel-section-label">Nom — Français (FR)</div>
-            <input type="text" class="setting-input" id="loc-name" placeholder="ex: Marché de Riyad">
+            <div class="sub-panel-section-label">Wilaya</div>
+            <select class="setting-input" id="place-wilaya" onchange="_onPlaceWilayaChange()">
+              <option value="">— Choisir une wilaya —</option>
+            </select>
           </div>
+
+          <div class="sub-panel-section">
+            <div class="sub-panel-section-label">Moughataa</div>
+            <select class="setting-input" id="place-moughataa" disabled>
+              <option value="">— Choisir d'abord une wilaya —</option>
+            </select>
+          </div>
+
+          <div id="place-geo-warning" style="display:none;flex-direction:column;gap:8px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:12px 14px;">
+            <div style="font-size:12.5px;color:#92400E;font-weight:700;">Les coordonnées GPS ne correspondent pas à la Wilaya/Moughataa sélectionnée.</div>
+            <div style="font-size:12px;color:#92400E;">Détecté : <span id="place-geo-detected-label"></span></div>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="btn-sm" style="background:#D97706;color:white;" onclick="applyDetectedGeo()">Corriger automatiquement</button>
+              <button type="button" class="btn-sm" style="background:var(--surface);border:1px solid var(--border);color:var(--text3);" onclick="dismissGeoWarning()">Garder la sélection actuelle</button>
+            </div>
+          </div>
+
           <div class="sub-panel-section">
             <div class="sub-panel-section-label">Nom — Arabe (AR) — عربي</div>
-            <input type="text" class="setting-input" id="loc-name-ar" dir="rtl" placeholder="مثال: سوق الرياض">
+            <input type="text" class="setting-input" id="place-name-ar" dir="rtl" placeholder="مثال: سوق الرياض">
           </div>
           <div class="sub-panel-section">
-            <div class="sub-panel-section-label">Nom — Hassaniya (HA) — حسانية</div>
-            <input type="text" class="setting-input" id="loc-name-ha" dir="rtl" placeholder="مثال: سوق الرياض">
+            <div class="sub-panel-section-label">Nom — Français (FR)</div>
+            <input type="text" class="setting-input" id="place-name-fr" placeholder="ex: Marché de Riyad">
           </div>
 
           <div class="sub-panel-section">
-            <div class="sub-panel-section-label">Type de lieu (optionnel)</div>
-            <select class="setting-input" id="loc-type">
+            <div class="sub-panel-section-label">Nom(s) — Hassaniya (HA) — حسانية</div>
+            <div style="display:flex;gap:8px;">
+              <input type="text" class="setting-input" id="place-name-ha-input" dir="rtl" placeholder="أضف اسمًا بالحسانية" style="flex:1;">
+              <button type="button" class="icon-btn-sm" onclick="addPlaceHaName()" title="Ajouter" style="width:44px;height:44px;flex-shrink:0;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+            </div>
+            <div class="ha-chip-list" id="place-ha-chips"></div>
+            <div class="sub-panel-hint">Ajoutez un ou plusieurs noms hassaniya, un à la fois.</div>
+          </div>
+
+          <div class="sub-panel-section">
+            <div class="sub-panel-section-label">Type de lieu</div>
+            <select class="setting-input" id="place-type">
               <option value="quartier">Quartier</option>
               <option value="marche">Marché</option>
-              <option value="hopital">Hôpital / clinique</option>
+              <option value="hopital">Hôpital</option>
+              <option value="clinique">Clinique</option>
               <option value="mosquee">Mosquée</option>
-              <option value="ecole">École / université</option>
+              <option value="ecole">École</option>
+              <option value="universite">Université</option>
               <option value="carrefour">Carrefour / point de repère</option>
               <option value="station">Station-service</option>
               <option value="admin">Administration</option>
               <option value="hotel">Hôtel</option>
               <option value="autre" selected>Autre / commerce</option>
             </select>
-            <div class="sub-panel-hint">Un lieu de type "Quartier" est traité comme une zone large par le chat (déclenche la précision) ; les autres types sont des repères précis.</div>
           </div>
 
           <div class="sub-panel-section">
             <div class="sub-panel-section-label">Coordonnées GPS</div>
             <div style="display:flex;gap:10px;">
-              <input type="number" step="0.00000001" class="setting-input" id="loc-lat" placeholder="Latitude (ex: 18.0870)">
-              <input type="number" step="0.00000001" class="setting-input" id="loc-lng" placeholder="Longitude (ex: -15.9570)">
+              <input type="number" step="0.00000001" class="setting-input" id="place-lat" placeholder="Latitude (ex: 18.0870)">
+              <input type="number" step="0.00000001" class="setting-input" id="place-lng" placeholder="Longitude (ex: -15.9570)">
             </div>
-            <div class="sub-panel-hint">Le quartier et les alias de recherche sont déterminés automatiquement à partir de ce point (reverse geocoding) — aucune saisie manuelle nécessaire.</div>
+            <div class="sub-panel-hint">Sélectionnez le point directement sur la carte (recherche ou clic).</div>
           </div>
 
-          <span class="admin-confirm-msg" id="loc-form-err" style="display:block;color:#DC2626;font-size:12.5px;"></span>
+          <span class="admin-confirm-msg" id="place-form-err" style="display:block;color:#DC2626;font-size:12.5px;"></span>
 
-          <button class="save-btn" onclick="saveLocationForm()">
+          <button class="save-btn" onclick="savePlaceForm()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             Enregistrer
           </button>
@@ -354,13 +393,40 @@
         <div class="location-form-map-col">
           <div class="sub-panel-section-label">Rechercher un endroit</div>
           <div class="loc-map-search-wrap">
-            <input type="text" class="setting-input" id="loc-map-search" placeholder="ex: Marché Capitale, Ksar, CHN…" autocomplete="off">
-            <div class="loc-map-search-results hidden" id="loc-map-search-results"></div>
+            <input type="text" class="setting-input" id="place-map-search" placeholder="ex: Marché Capitale, Ksar, CHN…" autocomplete="off">
+            <div class="loc-map-search-results hidden" id="place-map-search-results"></div>
           </div>
-          <div id="loc-map" class="location-form-map"></div>
+          <div id="place-map" class="location-form-map"></div>
           <div class="sub-panel-hint">Recherchez une adresse ou cliquez directement sur la carte pour placer / déplacer le marqueur.</div>
         </div>
       </div>
+    </div>
+
+    <!-- ── WILAYAS & MOUGHATAAS (gestion de la hiérarchie) ── -->
+    <div id="section-geo" class="section">
+      <h2 class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
+        </svg>
+        Wilayas &amp; Moughataas
+      </h2>
+      <p style="font-size:12.5px;color:var(--text3);margin:-8px 0 16px;">
+        Gérez la hiérarchie utilisée par la Base des lieux (Ville → Wilaya → Moughataa). Une wilaya ou une moughataa ne peut être supprimée que si elle est vide.
+      </p>
+
+      <div class="table-card" style="margin-bottom:18px;">
+        <div class="table-header">
+          <h3>Nouakchott</h3>
+          <div class="table-header-right">
+            <button class="btn-sm primary" onclick="openGeoModal('wilaya')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Ajouter une wilaya
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="geo-wilayas-list"></div>
     </div>
 
     <!-- ── SETTINGS ── -->
@@ -476,6 +542,36 @@
     <div class="admin-confirm-btns">
       <button class="admin-confirm-cancel" onclick="adminConfirmCancel()">Annuler</button>
       <button class="admin-confirm-ok" id="admin-confirm-ok">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Wilaya / Moughataa add-edit modal -->
+<div id="geo-modal-overlay" class="admin-confirm-overlay hidden" onclick="if(event.target===this)closeGeoModal()">
+  <div class="admin-confirm-box" style="max-width:420px;text-align:left;">
+    <div class="sub-panel-title" id="geo-modal-title" style="margin-bottom:18px;">Ajouter une wilaya</div>
+    <input type="hidden" id="geo-modal-id">
+    <input type="hidden" id="geo-modal-kind">
+
+    <div class="sub-panel-section" id="geo-modal-wilaya-row" style="margin-bottom:14px;display:none;">
+      <div class="sub-panel-section-label">Wilaya</div>
+      <select class="setting-input" id="geo-modal-wilaya-select"></select>
+    </div>
+
+    <div class="sub-panel-section" style="margin-bottom:14px;">
+      <div class="sub-panel-section-label">Nom (français)</div>
+      <input type="text" class="setting-input" id="geo-modal-name" placeholder="ex: Nouakchott-Est">
+    </div>
+    <div class="sub-panel-section" style="margin-bottom:14px;">
+      <div class="sub-panel-section-label">Nom (arabe)</div>
+      <input type="text" class="setting-input" id="geo-modal-name-ar" dir="rtl" placeholder="مثال: نواكشوط الشرقية">
+    </div>
+
+    <span class="admin-confirm-msg" id="geo-modal-err" style="display:block;color:#DC2626;font-size:12.5px;margin-bottom:10px;"></span>
+
+    <div class="admin-confirm-btns">
+      <button class="admin-confirm-cancel" onclick="closeGeoModal()">Annuler</button>
+      <button class="admin-confirm-ok" onclick="saveGeoModal()" style="background:linear-gradient(135deg, var(--p-xdark), var(--p));">Enregistrer</button>
     </div>
   </div>
 </div>

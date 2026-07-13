@@ -325,6 +325,19 @@ Selon la situation donnée :
 Ne mentionne, n'invente et ne suppose JAMAIS une donnée qui ne t'a pas été fournie explicitement (prix, nom de chauffeur, heure, statut...)."""
 
 
+def _build_reply_system_prompt(settings: LlmSettings) -> str:
+    # Même principe que _build_system_prompt (/analyze) : le contexte
+    # additionnel défini par l'admin (Paramètres IA > Prompt système)
+    # s'applique à TOUS les appels LLM, pas seulement à /analyze — sinon
+    # ce réglage n'aurait plus d'effet réel dès que la conversation passe
+    # par /reply ou /decide (ce qui est le cas pour la quasi-totalité du
+    # dialogue depuis l'introduction de decideNext/generateReply).
+    custom = (settings.system_prompt or "").strip()
+    if not custom:
+        return _REPLY_SYSTEM_PROMPT
+    return _REPLY_SYSTEM_PROMPT + f"\n\nContexte additionnel fourni par l'administrateur : {custom}"
+
+
 def _build_reply_user_prompt(situation: str, lang: str, location_ctx: dict | None, place: str | None, extra: dict | None = None) -> str:
     lang_label = {"fr": "français", "ar": "arabe", "ha": "hassaniya (arabe dialectal mauritanien)"}.get(lang, "français")
     lines = [f"Situation : {situation}", f"Langue de réponse : {lang_label}"]
@@ -385,7 +398,7 @@ def reply():
         search_text = location_text or place
         location_ctx = find_location_context(search_text, lang=lang, exclude_names=exclude_names) if search_text else None
 
-    system_prompt = _REPLY_SYSTEM_PROMPT
+    system_prompt = _build_reply_system_prompt(settings)
     user_prompt = _build_reply_user_prompt(situation, lang, location_ctx, place, extra)
 
     raw, err = _complete_or_error(settings, adapter, system_prompt, user_prompt)
@@ -443,6 +456,15 @@ Règles strictes :
 - Réponds uniquement avec le JSON demandé, rien d'autre.""".format(actions=", ".join(_DECIDE_ACTIONS))
 
 
+def _build_decide_system_prompt(settings: LlmSettings) -> str:
+    # Voir _build_reply_system_prompt : même raccordement du prompt
+    # personnalisé admin, pour /decide (IDLE / AWAITING_ORIGIN / AWAITING_DEST).
+    custom = (settings.system_prompt or "").strip()
+    if not custom:
+        return _DECIDE_SYSTEM_PROMPT
+    return _DECIDE_SYSTEM_PROMPT + f"\n\nContexte additionnel fourni par l'administrateur : {custom}"
+
+
 def _build_decide_user_prompt(text: str, context: dict, settings: LlmSettings) -> str:
     # Réutilise exactement la même construction d'historique que /analyze —
     # une seule source de vérité pour "comment on résume le contexte".
@@ -497,7 +519,7 @@ def decide():
     if err:
         return err
 
-    system_prompt = _DECIDE_SYSTEM_PROMPT
+    system_prompt = _build_decide_system_prompt(settings)
     user_prompt = _build_decide_user_prompt(text, context, settings)
 
     raw, err = _complete_or_error(settings, adapter, system_prompt, user_prompt)

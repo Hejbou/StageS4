@@ -1,4 +1,4 @@
-# NaqlaBot — Backend Flask + MySQL
+# ChatIA — Backend Flask + MySQL
 
 API REST pour l'application de transport mauritanienne.  
 Inspirée de **Heetch**, **Careem** et des apps locales mauritaniennes.

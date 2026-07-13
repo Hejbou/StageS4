@@ -94,12 +94,12 @@ const Transport = (() => {
                 ha: `${d.name} — ${d.car} (${d.plate}) · ${d.eta}` }[lang],
       });
       Notifications.toast(I18n.t('toast.req.accepted'), 'success');
-      const driverMsg = {
-        fr: `Chauffeur trouvé ! ${d.name} arrive dans ${d.eta} — ${d.car}, plaque ${d.plate}. ★ ${d.rating}.`,
-        ar: `تم العثور على سائق ! ${d.name} يصل خلال ${d.eta} — ${d.car}، لوحة ${d.plate}. تقييم ⭐ ${d.rating}.`,
-        ha: `لقينا سايق ! ${d.name} جاي في ${d.eta} — ${d.car}، لوحة ${d.plate}. تقييم ⭐ ${d.rating}.`,
-      }[lang] || `${d.name} en route (${d.eta})`;
-      Chat.addSystemMessage(driverMsg);
+      // Chauffeur/ETA/véhicule déjà vérifiés ci-dessus (result.driver) —
+      // le LLM ne fait que phraser la phrase autour, jamais les inventer
+      // (voir chat.js::_generateReply 'driver_found' pour le repli).
+      Chat.addSystemReply('driver_found', {
+        name: d.name, eta: d.eta, car: d.car, plate: d.plate, rating: d.rating,
+      }, lang);
     } else {
       req.status = STATUS.REFUSED;
       req.updatedAt = new Date().toISOString();
@@ -114,7 +114,7 @@ const Transport = (() => {
         msg:  { fr: 'Aucun chauffeur disponible. Réessayez.', ar: 'لا يوجد سائق متاح. حاول مرة أخرى.', ha: 'ما كاين سايق دابا. ارجع عاود.' }[I18n.getLang()],
       });
       Notifications.toast(I18n.t('toast.req.refused'), 'error');
-      Chat.addSystemMessage(I18n.t('ai.no.driver'));
+      Chat.addSystemReply('no_driver', {}, I18n.getLang());
     }
     _updateNavBadge();
   }
@@ -131,7 +131,7 @@ const Transport = (() => {
     _updateActiveBar();
     _updateNavBadge();
     Notifications.toast(I18n.t('toast.req.cancelled'), 'info');
-    Chat.addSystemMessage(I18n.t('ai.cancelled'));
+    Chat.addSystemReply('flow_abandoned', {}, I18n.getLang());
 
     // Sync cancellation to backend (fire and forget)
     try {

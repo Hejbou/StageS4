@@ -9,7 +9,9 @@ class ChatSession(db.Model):
     client_phone = db.Column(db.String(8), db.ForeignKey("users.phone"), nullable=True)
     language     = db.Column(db.Enum("fr", "ar", "ha"), nullable=False, default="fr")
     summary      = db.Column(db.String(255), nullable=True)
+    status       = db.Column(db.Enum("active", "closed"), nullable=False, default="active")
     started_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at   = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     ended_at     = db.Column(db.DateTime, nullable=True)
 
     messages = db.relationship(
@@ -20,13 +22,14 @@ class ChatSession(db.Model):
 
     def to_dict(self):
         return {
-            "id":           self.id,
-            "client_phone": self.client_phone,
-            "language":     self.language,
-            "summary":      self.summary,
-            "started_at":   self.started_at.isoformat() if self.started_at else None,
-            "ended_at":     self.ended_at.isoformat()   if self.ended_at   else None,
-            "turns":        self.messages.count(),
+            "id":        self.id,
+            "title":     self.summary or "Nouvelle conversation",
+            "language":  self.language,
+            "status":    self.status,
+            "createdAt": self.started_at.isoformat() if self.started_at else None,
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
+            "endedAt":   self.ended_at.isoformat()   if self.ended_at   else None,
+            "turns":     self.messages.count(),
         }
 
 

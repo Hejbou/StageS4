@@ -20,17 +20,6 @@ from ..utils.auth_helpers import require_admin
 llm_settings_bp = Blueprint("llm_settings", __name__)
 
 
-def _get_settings() -> LlmSettings:
-    """Récupère l'unique ligne de config, la crée avec les valeurs par
-    défaut du modèle si elle n'existe pas encore."""
-    settings = LlmSettings.query.get(1)
-    if not settings:
-        settings = LlmSettings(id=1)
-        db.session.add(settings)
-        db.session.commit()
-    return settings
-
-
 def _validate_payload(data):
     """Valide et normalise le payload. Retourne (clean, error_msg)."""
     clean = {}
@@ -101,7 +90,7 @@ def get_llm_settings():
     _, err = require_admin()
     if err: return err
 
-    return ok(_get_settings().to_dict())
+    return ok(LlmSettings.get_current().to_dict())
 
 
 # ── PUT /api/admin/llm-settings ─────────────────────────────────────────
@@ -116,7 +105,7 @@ def update_llm_settings():
     if msg:
         return error(msg)
 
-    settings = _get_settings()
+    settings = LlmSettings.get_current()
     for key, value in clean.items():
         setattr(settings, key, value)
     db.session.commit()

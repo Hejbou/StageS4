@@ -66,8 +66,10 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     id           INT UNSIGNED  NOT NULL AUTO_INCREMENT,
     client_phone VARCHAR(8)    NULL COMMENT 'Client connecté (nullable pour sessions anonymes)',
     language     ENUM('fr','ar','ha') NOT NULL DEFAULT 'fr',
-    summary      VARCHAR(255)  NULL COMMENT 'Premier message utilisateur',
+    summary      VARCHAR(255)  NULL COMMENT 'Premier message utilisateur (sert de titre)',
+    status       ENUM('active','closed') NOT NULL DEFAULT 'active',
     started_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at     DATETIME      NULL,
 
     PRIMARY KEY (id),

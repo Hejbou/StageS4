@@ -27,8 +27,11 @@ class LlmSettings(db.Model):
     # to_dict(). Un futur provider LLM la lira côté serveur uniquement.
     api_key = db.Column(db.String(255), nullable=True)
 
-    temperature = db.Column(db.Numeric(3, 2), nullable=False, default=0.3)
-    max_tokens  = db.Column(db.Integer, nullable=False, default=512)
+    # Tâche d'extraction structurée, pas de génération créative : température
+    # basse pour un résultat stable, et max_tokens réduit puisque la réponse
+    # attendue (voir le schéma JSON dans routes/nlu.py) tient en ~100 tokens.
+    temperature = db.Column(db.Numeric(3, 2), nullable=False, default=0.2)
+    max_tokens  = db.Column(db.Integer, nullable=False, default=300)
     system_prompt = db.Column(db.Text, nullable=True)
 
     # Liste de codes langue (sous-ensemble de SUPPORTED_LANGUAGES).
@@ -60,3 +63,15 @@ class LlmSettings(db.Model):
 
     def __repr__(self):
         return f"<LlmSettings provider={self.provider} model={self.model_name}>"
+
+    @classmethod
+    def get_current(cls) -> "LlmSettings":
+        """Récupère l'unique ligne de config (id=1), la crée avec les
+        valeurs par défaut du modèle si elle n'existe pas encore. Seul
+        point d'accès partagé par /api/admin/llm-settings et /api/nlu/*."""
+        settings = cls.query.get(1)
+        if not settings:
+            settings = cls(id=1)
+            db.session.add(settings)
+            db.session.commit()
+        return settings

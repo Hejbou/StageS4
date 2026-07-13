@@ -30,39 +30,6 @@ const Voice = (() => {
   };
   const LANG_MAP = { fr: 'fr-FR', ar: 'ar-SA', ha: 'ar-MR' };
 
-  // Demo phrases (fallback when mic unavailable) — include realistic Nouakchott locations
-  const SIM_PHRASES = {
-    fr: [
-      'Je veux un transport',
-      'Je pars du Marché Capitale, je vais à Tevragh Zeina',
-      'Emmène-moi de Ksar à la Cinquième',
-      'Je veux aller à Arafat depuis Sebkha',
-      'Transport de l\'Université vers le Centre-ville',
-      'Je voudrais aller à El Mina',
-      'Confirmer la demande',
-      'Quel est le statut de ma demande ?',
-    ],
-    ar: [
-      'أريد سيارة',
-      'أريد الذهاب من الكار إلى الجامعة',
-      'انطلاقاً من الخامسة إلى تفرغ زينة',
-      'أحتاج توصيلة من المطار إلى وسط المدينة',
-      'من الكار إلى أرفات من فضلك',
-      'ما حالة طلبي؟',
-      'تأكيد',
-      'إلغاء الطلب',
-    ],
-    ha: [
-      'بغيت كار',
-      'بغيت نروح من الخامسة للسوق',
-      'كار من الكار لتيفرغ زين',
-      'روح معايا من الجامعة للمطار',
-      'شحال الطلب ديالي؟',
-      'واخا أكد',
-      'إلغاء',
-    ],
-  };
-
   function _getSpeechLang() {
     const lang = _activeLang || I18n.getLang();
     return LANG_MAP[lang] || 'fr-FR';
@@ -206,12 +173,14 @@ const Voice = (() => {
     rec.onerror = (e) => {
       _hideSttOverlay();
       isListening = false;
+      // Ne jamais fabriquer une fausse transcription ici : un micro refusé
+      // ou indisponible doit produire une erreur claire, jamais un message
+      // que l'utilisateur n'a pas réellement prononcé (voir onErrorCb,
+      // géré par l'appelant — bouton micro ou mode appel).
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         Notifications.toast(I18n.t('voice.error'), 'warning');
-        _runSimulation();
-      } else if (onErrorCb) {
-        onErrorCb(e.error);
       }
+      if (onErrorCb) onErrorCb(e.error);
     };
 
     rec.onend = () => {
@@ -220,32 +189,6 @@ const Voice = (() => {
     };
 
     return rec;
-  }
-
-  // ── Simulation fallback ─────────────────────────────────────────
-  function _runSimulation(simLang) {
-    const lang    = simLang || I18n.getLang();
-    const phrases = SIM_PHRASES[lang] || SIM_PHRASES.fr;
-    const phrase  = phrases[Math.floor(Math.random() * phrases.length)];
-
-    if (!_isOverlayActive()) _showSttOverlay();
-    _setStatusText(I18n.t('voice.listening'));
-    isListening = true;
-
-    let i = 0;
-    const interval = setInterval(() => {
-      _updateTranscript(phrase.slice(0, i));
-      i++;
-      if (i > phrase.length) {
-        clearInterval(interval);
-        _setStatusText(I18n.t('voice.processing'));
-        setTimeout(() => {
-          if (!_isOverlayActive()) _hideSttOverlay();
-          isListening = false;
-          if (onResultCb) onResultCb(phrase);
-        }, 500);
-      }
-    }, 35);
   }
 
   // ── Low-level startListening / stopListening ────────────────────
@@ -260,10 +203,16 @@ const Voice = (() => {
         recognition.lang = _getSpeechLang();
         recognition.start();
       } catch {
-        _runSimulation();
+        // Ne jamais simuler une phrase ici : le micro n'a pas pu démarrer,
+        // l'utilisateur doit le savoir clairement plutôt que voir l'IA
+        // répondre à quelque chose qu'il n'a jamais dit.
+        Notifications.toast(I18n.t('voice.error'), 'warning');
+        if (onErrorCb) onErrorCb('start-failed');
       }
     } else {
-      _runSimulation();
+      // Navigateur sans SpeechRecognition (ex: Firefox) — même principe.
+      Notifications.toast(I18n.t('voice.error'), 'warning');
+      if (onErrorCb) onErrorCb('unsupported');
     }
   }
 
@@ -350,9 +299,14 @@ const Voice = (() => {
       },
       () => {
         if (_recCancelled) return;
-        // On error: show preview with whatever we have (simulation may still deliver)
+        // Micro indisponible/refusé : on ferme proprement la barre
+        // d'enregistrement plutôt que d'afficher un aperçu vide — le
+        // toast d'erreur clair est déjà affiché par startListening().
         _stopRecTimer();
-        if (_isRecording) _showRecBar('preview');
+        _isRecording = false;
+        _pendingTranscript = null;
+        _recordSendCb = null;
+        _hideRecBar();
       }
     );
   }

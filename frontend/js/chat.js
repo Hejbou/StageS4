@@ -49,6 +49,47 @@ const Chat = (() => {
   let typingTimer    = null;
   let _currentMode   = 'chat'; // 'chat' | 'call'
   let _onSpokenCb    = null;   // callback for call mode (fires after AI speaks)
+  let _lastTurnWasVoice = false; // le dernier message utilisateur venait-il du micro (mode chat) ?
+  let _currentSessionId = null; // conversation active en base (voir /api/chat/sessions) — null = pas encore créée
+
+  // ── Persistance de l'historique (une ligne par message, voir /api/chat) ──
+  // Ne contient AUCUNE logique métier : se contente d'enregistrer ce que le
+  // moteur a déjà décidé/répondu, pour pouvoir lister/rouvrir une
+  // conversation plus tard. Fire-and-forget : un échec réseau ici ne doit
+  // jamais bloquer ni ralentir la conversation en cours.
+  async function _ensureSession() {
+    if (_currentSessionId) return _currentSessionId;
+    try {
+      const resp = await Auth.authFetch('/api/chat/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ language: _lastLang }),
+      });
+      if (!resp.ok) return null;
+      const body = await resp.json();
+      _currentSessionId = body.data.id;
+      return _currentSessionId;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function _persistMessage(sender, content) {
+    if (!content) return;
+    // Le message d'accueil automatique (IA, avant toute saisie utilisateur)
+    // ne doit pas à lui seul créer une session vide à chaque rechargement.
+    if (sender === 'ai' && !_currentSessionId) return;
+    const sessionId = await _ensureSession();
+    if (!sessionId) return;
+    try {
+      await Auth.authFetch(`/api/chat/sessions/${sessionId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ sender, content }),
+      });
+    } catch (_) {
+      // Historique best-effort : une conversation continue même si elle
+      // n'a pas pu être sauvegardée pour cette réponse.
+    }
+  }
 
   // ── Translation helper: use detected lang, not UI lang ──────────
   function _t(key, lang) {
@@ -93,10 +134,17 @@ const Chat = (() => {
       ar: /(نعم|تأكيد|موافق|صحيح|تمام|طيب|أكد|وافق|ايه)/,
       ha: /(نعم|واخا|صح|تمام|طيب|أكد|وافق)/,
     },
+    // Volontairement étroit : ne doit matcher QUE une demande explicite
+    // d'annulation (voir _handleCancel/_doCancel) — jamais un mot de
+    // négation générique ("non", "pas", "لا", "ما"...) qui apparaît
+    // couramment dans un message flou/incertain sans rapport avec une
+    // annulation (ex: "je ne sais pas où c'est", "ما نعرفش") et qui
+    // annulerait alors la course à tort. Les cas "1/2/3" et les boutons
+    // de confirmation/annulation restent gérés séparément par état.
     CANCEL: {
-      fr: /\b(non|stop|arrêter|refus|quitter|pas|rien)\b/i,
-      ar: /(لا|وقف|توقف|ما أريد)/,
-      ha: /(لا|وقف|ما|بلا)/,
+      fr: /\b(annuler|annule|cancel)\b/i,
+      ar: /(ألغِ|إلغاء|كانسل)/,
+      ha: /(إلغاء|بغيت نلغي)/,
     },
     MODIFY: {
       fr: /\b(modifier|modifie|changer|corriger|éditer|changer le point|modifier le point)\b/i,
@@ -124,6 +172,19 @@ const Chat = (() => {
       ha: /(كارتة|خريطة|مسار|طريق)/,
     },
   };
+
+  // Garde-fou de développement : intents.js (chargé avant ce fichier) est
+  // la liste que lit aussi le backend pour valider un provider LLM — si
+  // elle diverge des clés définies ci-dessus, un intent existe d'un côté
+  // sans exister de l'autre. Averti dans la console, jamais bloquant.
+  if (typeof KNOWN_INTENTS !== 'undefined') {
+    const declared = Object.keys(INTENTS);
+    const missing  = KNOWN_INTENTS.filter(i => !declared.includes(i));
+    const extra    = declared.filter(i => !KNOWN_INTENTS.includes(i));
+    if (missing.length || extra.length) {
+      console.warn('[chat.js] INTENTS et KNOWN_INTENTS (intents.js) ont divergé :', { missing, extra });
+    }
+  }
 
   function _detectIntent(text) {
     const lang = LangDetect.detect(text, _lastLang);
@@ -190,7 +251,9 @@ const Chat = (() => {
     return el;
   }
 
-  // ── AI reply: text in chat, TTS only in call mode ───────────────
+  // ── AI reply: text always displayed; spoken aloud in call mode OR
+  // when the triggering user message itself came from the microphone
+  // (voice in → voice out symmetry, mode chat) ────────────────────
   function _aiReply(text, lang, delay = 850, cardHtml = null) {
     _showTyping();
     return new Promise(resolve => {
@@ -199,15 +262,19 @@ const Chat = (() => {
         const msg = { role: 'ai', text, time: _nowTime(), cardHtml };
         messages.push(msg);
         _renderMessage(msg);
+        _persistMessage('ai', text);
 
-        // Call mode → speak aloud, then fire callback
         if (_currentMode === 'call') {
+          // Mode appel : toujours parlé, puis on relance le cycle d'écoute.
           Voice.speak(text, lang, () => {
             if (_onSpokenCb) { const cb = _onSpokenCb; _onSpokenCb = null; cb(); }
             resolve();
           });
+        } else if (_lastTurnWasVoice) {
+          // Message tapé via le micro (mode chat) : parlé aussi, sans
+          // callback de reprise d'écoute (pas de cycle d'appel ici).
+          Voice.speak(text, lang, () => resolve());
         } else {
-          // Chat mode → no automatic TTS
           resolve();
         }
       }, delay);
@@ -221,10 +288,22 @@ const Chat = (() => {
     const msg = { role: 'ai', text, time: _nowTime() };
     messages.push(msg);
     _renderMessage(msg);
+    _persistMessage('ai', text);
     // Speak in call mode
     if (_currentMode === 'call') {
       Voice.speak(text, LangDetect.detect(text, _lastLang) || I18n.getLang());
     }
+  }
+
+  // ── Public: système message phrasé par le LLM (from transport.js) ──
+  // Utilisé pour les événements business (chauffeur trouvé, aucun
+  // chauffeur, annulation depuis l'onglet Courses) qui ne passent pas
+  // par processInput — même pipeline de phrasing que le reste de la
+  // conversation, jamais un texte composé côté transport.js lui-même.
+  async function addSystemReply(situation, data, lang) {
+    const l = lang || I18n.getLang();
+    const reply = await NLU.generateReply(situation, data || {}, l, _buildNluContext(l));
+    addSystemMessage(reply.message);
   }
 
   // For call mode: add user message visually from call.js
@@ -443,7 +522,10 @@ const Chat = (() => {
           `<span style="color:#10B981;font-size:13px;font-weight:600;padding:6px 0;">✓ Course conservée</span>`;
         state = STATE.IDLE;
         pendingCancel = null;
-        _aiReply(_t('ai.how.help', lang), lang, 300);
+        (async () => {
+          const reply = await NLU.generateReply('cancel_kept', {}, lang, _buildNluContext(lang));
+          await _aiReply(reply.message, lang, 300);
+        })();
       }
     });
   }
@@ -506,33 +588,134 @@ const Chat = (() => {
     return null;
   }
 
+  // Reproduit fidèlement, sous le nouveau contrat decideNext(), le
+  // dispatch qu'IDLE / AWAITING_ORIGIN / AWAITING_DEST exécutaient en dur
+  // avant Phase 2 (voir _dispatchViaDecide) — c'est ce qui garantit que
+  // "rules" (ou tout repli suite à une panne LLM) se comporte de façon
+  // STRICTEMENT identique à avant, testé et inchangé.
+  function _rulesDecideNext(text, context) {
+    const lang   = context.lang || _lastLang;
+    const state_ = context.state;
+    const intent = _detectIntent(text);
+
+    const _GLOBAL = ['CANCEL_TRIP', 'STATUS', 'HELP', 'HISTORY', 'MAP'];
+    if (_GLOBAL.includes(intent)) {
+      return { action: intent, route: null, message: null };
+    }
+    if (intent === 'CANCEL') {
+      return { action: 'CANCEL', route: null, message: null };
+    }
+
+    // AWAITING_ORIGIN / AWAITING_DEST : comportement historique inchangé —
+    // tout texte (hors CANCEL/global déjà traités ci-dessus) est tenté
+    // comme le lieu attendu, quel que soit l'intent détecté au passage
+    // (l'ancien code n'appelait JAMAIS _extractRoute depuis ces 2 états,
+    // seulement depuis IDLE — reproduit à l'identique ci-dessous).
+    if (state_ === STATE.AWAITING_ORIGIN) {
+      return { action: 'REQUEST_TRANSPORT', route: { origin: text.trim(), dest: null }, message: null };
+    }
+    if (state_ === STATE.AWAITING_DEST) {
+      return { action: 'REQUEST_TRANSPORT', route: { origin: null, dest: text.trim() }, message: null };
+    }
+
+    // IDLE : reproduit l'ancien switch(intent).
+    if (intent === 'GREET') {
+      return { action: 'GREET', route: null, message: null };
+    }
+    if (intent === 'REQUEST_TRANSPORT') {
+      const route = _extractRoute(text, lang);
+      return {
+        action: 'REQUEST_TRANSPORT',
+        // Même convention de champ que llm-provider.js::decideNext et
+        // extractRoute (partout ailleurs) : {origin, dest} — jamais
+        // "destination", pour ne jamais désynchroniser les deux
+        // implémentations du contrat decideNext().
+        route: route ? { origin: route.origin, dest: route.dest } : null,
+        message: null,
+      };
+    }
+
+    // UNKNOWN depuis IDLE : filet de sécurité Phase 1 — un texte qui
+    // correspond à un lieu connu (PoiDB) vaut comme début de réservation
+    // implicite plutôt qu'un abandon, même sans mot-clé de transport.
+    const poiHit = (typeof PoiDB !== 'undefined') ? PoiDB.search(text.trim()) : null;
+    if (poiHit && poiHit.found) {
+      return { action: 'REQUEST_TRANSPORT', route: { origin: text.trim(), dest: null }, message: null };
+    }
+    return { action: 'OFF_TOPIC', route: null, message: null };
+  }
+
   // ── Provider NLU actif : le moteur à règles ci-dessus (voir nlu.js) ─
   // Le contrat NLU accepte un `context` (état de la conversation) pour
   // qu'un futur provider (LLM) puisse l'exploiter ; le provider "rules"
   // actuel n'en a besoin que pour interpretLocationAnswer (repères déjà
-  // proposés, pour ne jamais reproposer le même) et ignore le reste.
+  // proposés, pour ne jamais reproposer le même) et decideNext (état
+  // courant) — il ignore le reste.
+  const _rulesProvider = {
+    detectIntent:          (text, _context) => _detectIntent(text),
+    extractRoute:          (text, lang, _context) => _extractRoute(text, lang),
+    interpretLocationAnswer: (text, lang, _context) => _interpretLocationAnswer(text, lang, _context),
+    generateReply:         (situation, data, lang, _context) => _generateReply(situation, data, lang),
+    decideNext:            (text, context) => _rulesDecideNext(text, context),
+  };
   if (typeof NLU !== 'undefined') {
-    NLU.registerProvider({
-      detectIntent:          (text, _context) => _detectIntent(text),
-      extractRoute:          (text, lang, _context) => _extractRoute(text, lang),
-      interpretLocationAnswer: (text, lang, _context) => _interpretLocationAnswer(text, lang, _context),
-    });
+    NLU.registerProvider(_rulesProvider);
+  }
+
+  // Au chargement, on est déjà opérationnel sur "rules" (ci-dessus, tout
+  // à fait suffisant en cas de panne réseau). Si un provider LLM est
+  // configuré côté admin, on le branche ensuite, TOUJOURS enveloppé d'un
+  // repli automatique vers "rules" — jamais utilisé seul. Aucune logique
+  // métier ne dépend de cette étape : elle ne fait que remplacer QUI
+  // comprend le message, jamais ce que le moteur en fait.
+  async function _initNluProvider() {
+    if (typeof NLU === 'undefined' || typeof Auth === 'undefined') return;
+    try {
+      const resp = await Auth.authFetch('/api/nlu/config');
+      if (!resp.ok) return; // reste sur "rules"
+      const cfg = (await resp.json()).data;
+      if (cfg && cfg.provider && cfg.provider !== 'rules' && typeof LlmProvider !== 'undefined') {
+        NLU.registerProvider(NLU.withFallback(LlmProvider, _rulesProvider));
+      }
+    } catch (_) { /* backend hors ligne — reste sur "rules" */ }
+  }
+
+  // Version minimale d'un message pour l'envoi à un provider NLU : { role,
+  // text, time } uniquement. Les messages IA portent aussi un `cardHtml`
+  // (carte de récap avec prix, téléphone client...) qui ne doit JAMAIS
+  // quitter le moteur — voir audit d'intégration LLM. On ne s'appuie pas
+  // sur le prompt-builder backend pour l'ignorer : la frontière est
+  // imposée ici, à la source, avant même que ces données ne transitent
+  // sur le réseau.
+  function _sanitizeMessageForNlu(m) {
+    if (!m) return null;
+    return { role: m.role, text: m.text, time: m.time };
   }
 
   // Contexte de conversation transmis à NLU à chaque appel — permet à un
   // provider plus riche qu'un moteur à règles (typiquement un LLM) de
   // savoir ce qui est déjà connu, et donc de ne jamais redemander une
-  // info déjà donnée. Rassemble exactement ce qu'un futur provider LLM
-  // devra recevoir : dernier message, historique, état du trajet en
-  // cours, lieux déjà proposés pendant l'affinage, langue détectée.
+  // info déjà donnée. Rassemble exactement ce qu'un provider LLM doit
+  // recevoir : dernier message, historique, état du trajet en cours,
+  // lieux déjà proposés pendant l'affinage, langue détectée — jamais de
+  // prix, de carte, de téléphone ou toute autre donnée métier.
+  //
+  // `history` est capé large ici (20) sans lire un réglage — un provider
+  // réseau (voir llm-provider.js) tronque lui-même à la taille configurée
+  // côté serveur (Paramètres IA), qui reste la seule source de vérité ;
+  // le provider "rules" actuel ignore ce champ de toute façon.
+  // `channel` est indicatif seulement ("chat" ici) — un futur canal voix/
+  // WhatsApp enverrait la même forme de contexte avec channel différent,
+  // sans changer le contrat.
   function _buildNluContext(lang) {
     return {
+      channel: 'chat',
       lang,
       state,
       pendingOrigin,
       pendingDest,
-      lastMessage: messages.length ? messages[messages.length - 1] : null,
-      history: messages.slice(-6),
+      lastMessage: messages.length ? _sanitizeMessageForNlu(messages[messages.length - 1]) : null,
+      history: messages.slice(-20).map(_sanitizeMessageForNlu),
       proposedPlaces: _precisionExcluded.map(id => {
         const p = PoiDB.getById(id);
         return p ? _poiName(p, lang) : id;
@@ -742,20 +925,31 @@ const Chat = (() => {
     return null;
   }
 
-  // Retourne { poi } si un repère précis a été identifié, { typeHint } si
-  // seule une catégorie a été devinée, ou {} si rien n'a été compris.
+  // Couche NLU pure : nettoie le texte (retire les prépositions
+  // relationnelles) et devine une catégorie si aucune instance précise
+  // n'est nommée. Ne fait JAMAIS de recherche/validation de lieu elle-
+  // même — { cleaned, typeHint } seulement. C'est _handlePrecisionAnswer
+  // (le moteur) qui interroge PoiDB avec ce texte, exactement comme il
+  // le fait déjà pour l'origine et la destination — le même contrat vaut
+  // pour un futur provider LLM (voir nlu.js).
   function _interpretLocationAnswer(text, lang, _context) {
     const cleaned = _stripRelational(text);
-    const match = PoiDB.search(cleaned);
-    if (match.found && match.poi && match.poi.type !== 'quartier') return { poi: match.poi, cleaned, matchType: match.match };
+    return { cleaned, typeHint: _detectTypeHint(text) };
+  }
 
-    // Repli : le texte brut (au cas où la préposition faisait partie d'un alias).
+  // Recherche PoiDB pour une réponse de précision : essaie le texte
+  // nettoyé (prépositions retirées) puis, si différent, le texte brut
+  // (au cas où la préposition faisait partie d'un alias). Toujours
+  // appelé par le moteur après NLU.interpretLocationAnswer, jamais par
+  // le provider lui-même.
+  function _matchPrecisionAnswer(cleaned, text) {
+    const match = PoiDB.search(cleaned);
+    if (match.found && match.poi && match.poi.type !== 'quartier') return match;
     if (cleaned !== text) {
       const rawMatch = PoiDB.search(text);
-      if (rawMatch.found && rawMatch.poi && rawMatch.poi.type !== 'quartier') return { poi: rawMatch.poi, cleaned: text, matchType: rawMatch.match };
+      if (rawMatch.found && rawMatch.poi && rawMatch.poi.type !== 'quartier') return rawMatch;
     }
-
-    return { typeHint: _detectTypeHint(text), cleaned };
+    return null;
   }
 
   // target: 'origin' | 'dest' — la même logique d'affinage sert aux deux points.
@@ -778,30 +972,29 @@ const Chat = (() => {
     _precisionTarget   = target;
     state = target === 'dest' ? STATE.AWAITING_DEST_PRECISION : STATE.AWAITING_ORIGIN_PRECISION;
 
-    const landmarks = _nextLandmarks(lang);
-    const msg = landmarks.length
-      ? _fill(_t('ai.precision.intro', lang), { zone: zoneLabel, list: _landmarksList(landmarks, lang) })
-      : _fill(_t('ai.precision.intro.nolist', lang), { zone: zoneLabel });
-    await _aiReply(msg, lang, 400);
+    const reply = await NLU.generateReply('zone_detected', { zone: zoneLabel, excludeNames: [] }, lang, _buildNluContext(lang));
+    _syncExcludedFromReply(reply);
+    await _aiReply(reply.message, lang, 400);
   }
 
   async function _handlePrecisionAnswer(text, lang, skipMatchConfirm = false) {
     _showTyping();
-    const interpreted = NLU.interpretLocationAnswer(text, lang, _buildNluContext(lang));
+    const interpreted = await NLU.interpretLocationAnswer(text, lang, _buildNluContext(lang));
+    const match = _matchPrecisionAnswer(interpreted.cleaned || text, text);
     _hideTyping();
 
     // Réponse précise : un repère identifié (pas un simple quartier) ─────
-    if (interpreted.poi) {
-      const place = _poiName(interpreted.poi, lang);
+    if (match) {
+      const place = _poiName(match.poi, lang);
 
-      if (!skipMatchConfirm && interpreted.matchType === 'fuzzy') {
+      if (!skipMatchConfirm && match.match === 'fuzzy') {
         const returnState = _precisionTarget === 'dest' ? STATE.AWAITING_DEST_PRECISION : STATE.AWAITING_ORIGIN_PRECISION;
         await _askMatchConfirm(_precisionTarget, place, lang, returnState);
         return;
       }
 
-      const confirmMsg = _fill(_t('ai.precision.confirmed', lang), { place });
-      await _aiReply(confirmMsg, lang, 350);
+      const confirmReply = await NLU.generateReply('confirmed', { place }, lang, _buildNluContext(lang));
+      await _aiReply(confirmReply.message, lang, 350);
       await _finalizePrecisePlace(_precisionTarget, place, lang);
       return;
     }
@@ -814,8 +1007,8 @@ const Chat = (() => {
       const fallbackId = _precisionExcluded[0];
       const fallback    = fallbackId ? PoiDB.getById(fallbackId) : null;
       const place = fallback ? _poiName(fallback, lang) : (_precisionZone ? _precisionZone.label : text.trim());
-      const giveupMsg = _fill(_t('ai.precision.giveup', lang), { place });
-      await _aiReply(giveupMsg, lang, 400);
+      const giveupReply = await NLU.generateReply('giveup', { place }, lang, _buildNluContext(lang));
+      await _aiReply(giveupReply.message, lang, 400);
       await _finalizePrecisePlace(_precisionTarget, place, lang);
       return;
     }
@@ -823,11 +1016,124 @@ const Chat = (() => {
     // Une catégorie a été devinée ("مسجد", "hôpital"...) sans lieu précis :
     // on oriente la prochaine suggestion vers ce type plutôt que de
     // proposer des types au hasard.
-    const landmarks = _nextLandmarks(lang, interpreted.typeHint);
-    const msg = landmarks.length
-      ? _fill(_t('ai.precision.ask.landmarks', lang), { list: _landmarksList(landmarks, lang) })
-      : _t('ai.precision.not.matched', lang);
-    await _aiReply(msg, lang, 350);
+    const askReply = await NLU.generateReply('ask_landmarks', {
+      zone: _precisionZone ? _precisionZone.label : null,
+      typeHint: interpreted.typeHint,
+      excludeNames: _excludedNames(lang),
+    }, lang, _buildNluContext(lang));
+    _syncExcludedFromReply(askReply);
+    await _aiReply(askReply.message, lang, 350);
+  }
+
+  // ── Synchronisation de la liste d'exclusion avec la réponse NLU ──────
+  // "rules" met déjà _precisionExcluded à jour lui-même (voir _nextLandmarks,
+  // appelé en interne par _rulesProvider.generateReply) ; seule une réponse
+  // LLM (qui a fait sa propre recherche côté backend, voir /api/nlu/reply)
+  // renvoie nearbyPlaces et doit être réconciliée ici, pour que la suite de
+  // la conversation ne reprop ose jamais un lieu déjà montré à l'utilisateur.
+  function _syncExcludedFromReply(reply) {
+    if (!reply || !Array.isArray(reply.nearbyPlaces)) return;
+    reply.nearbyPlaces.forEach(p => {
+      const found = PoiDB.search(p.name);
+      if (found && found.found && found.poi && !_precisionExcluded.includes(found.poi.id)) {
+        _precisionExcluded.push(found.poi.id);
+      }
+    });
+  }
+
+  function _excludedNames(lang) {
+    return _precisionExcluded
+      .map(id => { const p = PoiDB.getById(id); return p ? _poiName(p, lang) : null; })
+      .filter(Boolean);
+  }
+
+  // ── generateReply du provider "rules" — gabarits de phrase historiques.
+  // Reproduit exactement le comportement d'avant l'intégration LLM (voir
+  // git blame) : c'est le filet de sécurité utilisé si aucun provider LLM
+  // n'est actif, ou si NLU.withFallback() y retombe après un échec réseau.
+  async function _generateReply(situation, data, lang) {
+    switch (situation) {
+      case 'zone_detected': {
+        const landmarks = _nextLandmarks(lang);
+        return { message: landmarks.length
+          ? _fill(_t('ai.precision.intro', lang), { zone: data.zone, list: _landmarksList(landmarks, lang) })
+          : _fill(_t('ai.precision.intro.nolist', lang), { zone: data.zone }) };
+      }
+      case 'ask_landmarks': {
+        const landmarks = _nextLandmarks(lang, data.typeHint);
+        return { message: landmarks.length
+          ? _fill(_t('ai.precision.ask.landmarks', lang), { list: _landmarksList(landmarks, lang) })
+          : _t('ai.precision.not.matched', lang) };
+      }
+      case 'confirmed':
+        return { message: _fill(_t('ai.precision.confirmed', lang), { place: data.place }) };
+      case 'giveup':
+        return { message: _fill(_t('ai.precision.giveup', lang), { place: data.place }) };
+
+      // ── Situations ajoutées pour éliminer le dialogue concurrent moteur/LLM
+      // (voir _dispatchViaDecide et les autres états ci-dessous) — reproduit
+      // ici EXACTEMENT les anciens gabarits, c'est le filet de secours.
+      case 'match_declined':
+        return { message: _t('ai.match.declined', lang) };
+      case 'modify_choice':
+        return { message: _t('ai.modify.choice', lang) };
+      case 'modify_ask_origin':
+        return { message: _t('ai.modify.new.origin', lang) };
+      case 'modify_ask_dest':
+        return { message: _t('ai.modify.new.dest', lang) };
+      case 'cancel_kept':
+        return { message: _t('ai.how.help', lang) };
+      case 'booking_cancelled':
+        return { message: _t('ai.cancel.confirmed', lang) };
+      case 'flow_abandoned':
+        return { message: _t('ai.cancelled', lang) };
+      case 'confirm_options':
+        return { message: _t('ai.confirm.options', lang) };
+      case 'booking_confirmed':
+        return { message: _t('ai.confirmed', lang) };
+      case 'price_announce':
+        return { message: _fill(_t('ai.price.announce', lang), { from: data.from, to: data.to, price: data.price }) };
+      case 'retry_origin':
+        return { message: data.suggestion
+          ? _fill(_t('ai.location.suggest', lang), { place: data.place, suggestion: data.suggestion })
+          : _fill(_t('ai.location.not.found', lang), { place: data.place }) };
+      case 'retry_dest':
+        return { message: data.suggestion
+          ? _fill(_t('ai.location.suggest.dest', lang), { place: data.place, suggestion: data.suggestion })
+          : _fill(_t('ai.location.not.found.dest', lang), { place: data.place }) };
+      case 'ask_destination':
+        return { message: _t('ai.ask.dest', lang) };
+      case 'global_no_active':
+        return { message: _t('ai.no.active', lang) };
+      case 'global_active_trip':
+        return { message: data.contextType === 'cancel'
+          ? ({ fr: 'Votre course active :', ar: 'رحلتك النشطة :', ha: 'الطلب ديالك :' }[lang] || 'Votre course active :')
+          : ({ fr: 'Voici votre course :', ar: 'إليك رحلتك :', ha: 'هذا الطلب ديالك :' }[lang] || 'Voici votre course :') };
+      case 'global_help':
+        return { message: _t('ai.help', lang) };
+      case 'global_history':
+        return { message: { fr:'Voici votre historique.', ar:'إليك سجل محادثاتك.', ha:'هذا السجل ديالك.' }[lang] || 'Historique' };
+      case 'global_map':
+        return { message: _t('ai.map.intro', lang) };
+      case 'driver_found':
+        // Reproduit EXACTEMENT le gabarit historique (transport.js), qui
+        // n'était jamais passé par _t() — texte figé par langue, jamais
+        // de clé de traduction ici.
+        return { message: {
+          fr: `Chauffeur trouvé ! ${data.name} arrive dans ${data.eta} — ${data.car}, plaque ${data.plate}. ★ ${data.rating}.`,
+          ar: `تم العثور على سائق ! ${data.name} يصل خلال ${data.eta} — ${data.car}، لوحة ${data.plate}. تقييم ⭐ ${data.rating}.`,
+          ha: `لقينا سايق ! ${data.name} جاي في ${data.eta} — ${data.car}، لوحة ${data.plate}. تقييم ⭐ ${data.rating}.`,
+        }[lang] || `${data.name} en route (${data.eta})` };
+      case 'no_driver':
+        return { message: _t('ai.no.driver', lang) };
+      case 'status_pending':
+        return { message: _t('ai.status.pending', lang) };
+      case 'match_confirm_ask':
+        return { message: _fill(_t('ai.match.confirm', lang), { place: data.place }) };
+
+      default:
+        return { message: _t('ai.precision.not.matched', lang) };
+    }
   }
 
   function _resetPrecision() {
@@ -879,7 +1185,8 @@ const Chat = (() => {
       return;
     }
     state = STATE.AWAITING_DEST;
-    await _aiReply(_t('ai.ask.dest', lang), lang);
+    const askReply = await NLU.generateReply('ask_destination', {}, lang, _buildNluContext(lang));
+    await _aiReply(askReply.message, lang);
   }
 
   // ── Confirmation obligatoire des correspondances approximatives ─────
@@ -890,7 +1197,8 @@ const Chat = (() => {
   async function _askMatchConfirm(target, place, lang, returnState) {
     _matchCandidate = { target, place, lang, returnState };
     state = target === 'dest' ? STATE.AWAITING_DEST_MATCH_CONFIRM : STATE.AWAITING_ORIGIN_MATCH_CONFIRM;
-    await _aiReply(_fill(_t('ai.match.confirm', lang), { place }), lang, 300);
+    const askReply = await NLU.generateReply('match_confirm_ask', { place }, lang, _buildNluContext(lang));
+    await _aiReply(askReply.message, lang, 300);
   }
 
   async function _handleMatchConfirmAnswer(text, lang, intent) {
@@ -905,8 +1213,8 @@ const Chat = (() => {
     // Oui -> on enregistre enfin le lieu proposé.
     if (trimmed === '1' || intent === 'CONFIRM') {
       if (isPrecisionReturn) {
-        const confirmMsg = _fill(_t('ai.precision.confirmed', lang), { place: candidate.place });
-        await _aiReply(confirmMsg, lang, 300);
+        const confirmReply = await NLU.generateReply('confirmed', { place: candidate.place }, lang, _buildNluContext(lang));
+        await _aiReply(confirmReply.message, lang, 300);
       }
       await _finalizePrecisePlace(candidate.target, candidate.place, lang);
       return;
@@ -917,13 +1225,16 @@ const Chat = (() => {
     if (trimmed === '2' || intent === 'CANCEL') {
       state = candidate.returnState;
       if (isPrecisionReturn) {
-        const landmarks = _nextLandmarks(lang);
-        const msg = landmarks.length
-          ? _fill(_t('ai.precision.ask.landmarks', lang), { list: _landmarksList(landmarks, lang) })
-          : _t('ai.precision.not.matched', lang);
-        await _aiReply(msg, lang, 300);
+        const askReply = await NLU.generateReply('ask_landmarks', {
+          zone: _precisionZone ? _precisionZone.label : null,
+          typeHint: null,
+          excludeNames: _excludedNames(lang),
+        }, lang, _buildNluContext(lang));
+        _syncExcludedFromReply(askReply);
+        await _aiReply(askReply.message, lang, 300);
       } else {
-        await _aiReply(_t('ai.match.declined', lang), lang, 300);
+        const declinedReply = await NLU.generateReply('match_declined', {}, lang, _buildNluContext(lang));
+        await _aiReply(declinedReply.message, lang, 300);
       }
       return;
     }
@@ -951,7 +1262,7 @@ const Chat = (() => {
     // isole l'origine et on mémorise la destination pour plus tard — sauf
     // en flux de modification (_modifyingPoint), où la destination existe
     // déjà et ne doit pas être écrasée après coup.
-    const route = NLU.extractRoute(text, lang, _buildNluContext(lang));
+    const route = await NLU.extractRoute(text, lang, _buildNluContext(lang));
     const originText = route ? route.origin : text;
     if (route && !_autoDest && !_modifyingPoint) _autoDest = route.dest;
 
@@ -962,10 +1273,8 @@ const Chat = (() => {
 
     if (!locO.found && _originRetries < 2) {
       _originRetries++;
-      const msg = locO.suggestion
-        ? _fill(_t('ai.location.suggest', lang), { place: originText, suggestion: locO.suggestion })
-        : _fill(_t('ai.location.not.found', lang), { place: originText });
-      await _aiReply(msg, lang, 350);
+      const retryReply = await NLU.generateReply('retry_origin', { place: originText, suggestion: locO.suggestion || null }, lang, _buildNluContext(lang));
+      await _aiReply(retryReply.message, lang, 350);
       return;
     }
     _originRetries = 0;
@@ -998,10 +1307,8 @@ const Chat = (() => {
 
     if (!locD.found && _destRetries < 2) {
       _destRetries++;
-      const msg = locD.suggestion
-        ? _fill(_t('ai.location.suggest.dest', lang), { place: text, suggestion: locD.suggestion })
-        : _fill(_t('ai.location.not.found.dest', lang), { place: text });
-      await _aiReply(msg, lang, 350);
+      const retryReply = await NLU.generateReply('retry_dest', { place: text, suggestion: locD.suggestion || null }, lang, _buildNluContext(lang));
+      await _aiReply(retryReply.message, lang, 350);
       return;
     }
     _destRetries = 0;
@@ -1022,6 +1329,151 @@ const Chat = (() => {
     await _finalizePrecisePlace('dest', locD.formatted, lang);
   }
 
+  // ── Actions "globales" (identiques à avant Phase 2, voir l'ancien
+  // switch(intent) plus bas, conservé pour l'état AWAITING_CANCEL_CONF) ─
+  async function _runGlobalAction(action, lang) {
+    switch (action) {
+      case 'CANCEL_TRIP': {
+        const active = Transport.getActive();
+        if (active && (active.status === 'pending' || active.status === 'accepted')) {
+          pendingCancel = active;
+          state = STATE.AWAITING_CANCEL_CONF;
+          const introReply = await NLU.generateReply('global_active_trip', { contextType: 'cancel' }, lang, _buildNluContext(lang));
+          await _aiReply(introReply.message, lang, 600, _buildCancelCard(active, lang));
+        } else {
+          const noActiveReply = await NLU.generateReply('global_no_active', {}, lang, _buildNluContext(lang));
+          await _aiReply(noActiveReply.message, lang);
+        }
+        break;
+      }
+      case 'STATUS': {
+        const active = Transport.getActive();
+        if (!active) {
+          const noActiveReply = await NLU.generateReply('global_no_active', {}, lang, _buildNluContext(lang));
+          await _aiReply(noActiveReply.message, lang);
+        } else {
+          const introReply = await NLU.generateReply('global_active_trip', { contextType: 'status' }, lang, _buildNluContext(lang));
+          await _aiReply(introReply.message, lang, 600, _buildStatusCard(active, lang));
+        }
+        break;
+      }
+      case 'HELP': {
+        const helpReply = await NLU.generateReply('global_help', {}, lang, _buildNluContext(lang));
+        await _aiReply(helpReply.message, lang);
+        break;
+      }
+      case 'HISTORY': {
+        const historyReply = await NLU.generateReply('global_history', {}, lang, _buildNluContext(lang));
+        await _aiReply(historyReply.message, lang, 500);
+        if (_currentMode === 'chat') App.navigateTo('history');
+        break;
+      }
+      case 'MAP': {
+        const mapReply = await NLU.generateReply('global_map', {}, lang, _buildNluContext(lang));
+        await _aiReply(mapReply.message, lang, 400);
+        if (_currentMode === 'chat') {
+          App.navigateTo('map');
+          if (pendingOrigin || pendingDest) {
+            setTimeout(() => MapView.setRoute(pendingOrigin || '', pendingDest || ''), 200);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // ── Phase 2 : IDLE / AWAITING_ORIGIN / AWAITING_DEST passent par
+  // NLU.decideNext() — le LLM comprend le message dans son contexte
+  // complet (état, historique, lieux déjà connus) et choisit l'ACTION à
+  // mener, plutôt que la façade detectIntent() figée d'avant. Le moteur
+  // reste seul à exécuter la logique métier : toute extraction de lieu
+  // repart en texte brut vers _handleOriginText/_handleDestText,
+  // EXACTEMENT comme avant (validation PoiDB, zone vague -> précision,
+  // correspondance approximative -> confirmation, prix, réservation —
+  // rien de tout cela ne change). "message" (LLM) n'est utilisé que pour
+  // l'accueil, la demande initiale d'origine et la clarification —
+  // jamais pour une action métier (annulation, statut...), qui garde son
+  // gabarit et son code existants.
+  async function _dispatchViaDecide(text, lang, options) {
+    const decision = await NLU.decideNext(text, _buildNluContext(lang));
+    const action = decision.action || 'CLARIFY';
+    const route  = decision.route || null;
+
+    const _GLOBAL = ['CANCEL_TRIP', 'STATUS', 'HELP', 'HISTORY', 'MAP'];
+    if (_GLOBAL.includes(action)) {
+      if (state !== STATE.IDLE) {
+        pendingOrigin = null; pendingDest = null; pendingEstimate = null;
+        pendingGeoData = null; _modifyingPoint = null; pendingPhone = null;
+        _originRetries = 0; _destRetries = 0;
+        _resetPrecision();
+        _autoDest = null;
+        _matchCandidate = null;
+        state = STATE.IDLE;
+      }
+      await _runGlobalAction(action, lang);
+      return;
+    }
+
+    if (action === 'CANCEL') {
+      if (state !== STATE.IDLE) {
+        await _handleCancel(lang);
+      } else {
+        const noActiveReply = await NLU.generateReply('global_no_active', {}, lang, _buildNluContext(lang));
+        await _aiReply(noActiveReply.message, lang);
+      }
+      return;
+    }
+
+    if (action === 'GREET') {
+      await _aiReply(decision.message || _t('ai.welcome', lang), lang);
+      return;
+    }
+
+    if (action === 'REQUEST_TRANSPORT') {
+      if (state === STATE.IDLE) {
+        const active = Transport.getActive();
+        if (active && active.status === 'pending') {
+          const pendingReply = await NLU.generateReply('status_pending', {}, lang, _buildNluContext(lang));
+          await _aiReply(pendingReply.message, lang);
+          return;
+        }
+        if (route && route.origin) {
+          _autoDest = route.dest || null;
+          await _handleOriginText(route.origin, lang);
+          return;
+        }
+        state = STATE.AWAITING_ORIGIN;
+        await _aiReply(decision.message || _t('ai.ask.origin', lang), lang);
+        return;
+      }
+      if (state === STATE.AWAITING_ORIGIN) {
+        const originAnswer = route ? (route.origin || route.dest) : null;
+        if (originAnswer) { await _handleOriginText(originAnswer, lang, !!options.explicitSelection); return; }
+      }
+      if (state === STATE.AWAITING_DEST) {
+        const destAnswer = route ? (route.dest || route.origin) : null;
+        if (destAnswer) { await _handleDestText(destAnswer, lang, !!options.explicitSelection); return; }
+      }
+      // Aucun lieu exploitable malgré une action REQUEST_TRANSPORT : on
+      // retombe sur la clarification ci-dessous plutôt que de bloquer.
+    }
+
+    // Rien d'exploitable pendant la collecte d'un lieu : clarification
+    // naturelle (LLM) si le sujet reste probablement le transport, sinon
+    // réponse neutre — jamais une annulation, jamais un lieu supposé.
+    if (state === STATE.AWAITING_ORIGIN || state === STATE.AWAITING_DEST) {
+      await _aiReply(decision.message || _t('ai.unknown', lang), lang, 350);
+      return;
+    }
+
+    // IDLE, rien de reconnu :
+    if (action === 'CLARIFY' && decision.message) {
+      await _aiReply(decision.message, lang);
+      return;
+    }
+    await _aiReply(_t('ai.unknown', lang), lang);
+  }
+
   // ── Main processInput — called by Chat UI and Call mode ─────────
   // options: { mode: 'chat'|'call', onSpoken: callback }
   async function processInput(text, options = {}) {
@@ -1039,15 +1491,27 @@ const Chat = (() => {
 
     // Add user message to chat (call mode adds it separately before calling processInput)
     if (_currentMode === 'chat') {
+      _lastTurnWasVoice = !!options.isVoice;
       const userMsg = { role: 'user', text, time: _nowTime(), isVoice: options.isVoice || false };
       messages.push(userMsg);
       _renderMessage(userMsg);
+      _persistMessage('user', text);
     }
 
-    const intent = NLU.detectIntent(text, _buildNluContext(lang));
-
-    // Sync voice recognition language to detected language
     if (typeof Voice !== 'undefined') Voice.setActiveLang(lang);
+
+    // ── Phase 2 : IDLE / AWAITING_ORIGIN / AWAITING_DEST passent par
+    // NLU.decideNext() (voir _dispatchViaDecide) — le LLM décide de
+    // l'action et de la question suivante sur CES 3 états seulement.
+    // Tous les autres états (précision, confirmation de correspondance,
+    // confirmation de prix, modification, annulation) restent gérés
+    // ci-dessous, INCHANGÉS.
+    if (state === STATE.IDLE || state === STATE.AWAITING_ORIGIN || state === STATE.AWAITING_DEST) {
+      await _dispatchViaDecide(text, lang, options);
+      return;
+    }
+
+    const intent = await NLU.detectIntent(text, _buildNluContext(lang));
 
     // ── Global intent override ─────────────────────────────────────
     // CANCEL_TRIP / STATUS / HELP / HISTORY / MAP always interrupt any
@@ -1067,12 +1531,8 @@ const Chat = (() => {
     }
 
     // ── State-aware handlers ──────────────────────────────────────
-
-    if (state === STATE.AWAITING_ORIGIN) {
-      if (intent === 'CANCEL') { await _handleCancel(lang); return; }
-      await _handleOriginText(text.trim(), lang, !!options.explicitSelection);
-      return;
-    }
+    // (AWAITING_ORIGIN / AWAITING_DEST are handled above via
+    // _dispatchViaDecide — never reached from here anymore.)
 
     if (state === STATE.AWAITING_ORIGIN_PRECISION || state === STATE.AWAITING_DEST_PRECISION) {
       if (intent === 'CANCEL') { await _handleCancel(lang); return; }
@@ -1085,18 +1545,13 @@ const Chat = (() => {
       return;
     }
 
-    if (state === STATE.AWAITING_DEST) {
-      if (intent === 'CANCEL') { await _handleCancel(lang); return; }
-      await _handleDestText(text.trim(), lang, !!options.explicitSelection);
-      return;
-    }
-
     if (state === STATE.AWAITING_CONFIRM) {
       const trimmed = text.trim();
       if (trimmed === '1' || intent === 'CONFIRM') { await _handleConfirm(lang); return; }
       if (trimmed === '2' || intent === 'CANCEL')  { await _handleCancel(lang);  return; }
       if (trimmed === '3' || intent === 'MODIFY')  { await _handleModify(lang);  return; }
-      await _aiReply(_t('ai.confirm.options', lang), lang, 350);
+      const optsReply = await NLU.generateReply('confirm_options', {}, lang, _buildNluContext(lang));
+      await _aiReply(optsReply.message, lang, 350);
       return;
     }
 
@@ -1112,16 +1567,19 @@ const Chat = (() => {
       if (isOrigin) {
         _modifyingPoint = 'origin';
         state = STATE.AWAITING_ORIGIN;
-        await _aiReply(_t('ai.modify.new.origin', lang), lang, 350);
+        const reply = await NLU.generateReply('modify_ask_origin', {}, lang, _buildNluContext(lang));
+        await _aiReply(reply.message, lang, 350);
         return;
       }
       if (isDest) {
         _modifyingPoint = 'dest';
         state = STATE.AWAITING_DEST;
-        await _aiReply(_t('ai.modify.new.dest', lang), lang, 350);
+        const reply = await NLU.generateReply('modify_ask_dest', {}, lang, _buildNluContext(lang));
+        await _aiReply(reply.message, lang, 350);
         return;
       }
-      await _aiReply(_t('ai.modify.choice', lang), lang, 350);
+      const choiceReply = await NLU.generateReply('modify_choice', {}, lang, _buildNluContext(lang));
+      await _aiReply(choiceReply.message, lang, 350);
       return;
     }
 
@@ -1130,7 +1588,8 @@ const Chat = (() => {
       if (intent === 'CANCEL')  {
         state = STATE.IDLE;
         pendingCancel = null;
-        await _aiReply(_t('ai.how.help', lang), lang, 500);
+        const keptReply = await NLU.generateReply('cancel_kept', {}, lang, _buildNluContext(lang));
+        await _aiReply(keptReply.message, lang, 500);
         return;
       }
     }
@@ -1151,7 +1610,7 @@ const Chat = (() => {
         // Le message donne peut-être déjà les deux lieux en une phrase
         // ("Je veux aller de Ksar à Tevragh Zeina") — on essaie de les
         // extraire directement au lieu de reposer la question de l'origine.
-        const route = NLU.extractRoute(text, lang, _buildNluContext(lang));
+        const route = await NLU.extractRoute(text, lang, _buildNluContext(lang));
         if (route) {
           _autoDest = route.dest;
           await _handleOriginText(route.origin, lang);
@@ -1220,9 +1679,25 @@ const Chat = (() => {
         break;
       }
 
-      default:
-        await _aiReply(_t('ai.unknown', lang), lang);
+      default: {
+        // Un message bref classé UNKNOWN (aucun mot-clé de transport)
+        // correspond pourtant parfois à un lieu connu (ex: "دار النعيم"
+        // seul, en tout premier message) — un client qui ouvre la
+        // conversation avec un simple nom d'endroit indique presque
+        // toujours son point de départ, pas un sujet hors transport.
+        // Vérification volontairement locale et synchrone (PoiDB.search,
+        // pas de recherche réseau) pour ne jamais ralentir un message
+        // réellement hors-sujet en tentant de le géocoder pour rien.
+        const active  = Transport.getActive();
+        const poiHit  = (typeof PoiDB !== 'undefined') ? PoiDB.search(text.trim()) : null;
+        if (poiHit && poiHit.found && !(active && active.status === 'pending')) {
+          state = STATE.AWAITING_ORIGIN;
+          await _handleOriginText(text.trim(), lang);
+        } else {
+          await _aiReply(_t('ai.unknown', lang), lang);
+        }
         break;
+      }
     }
   }
 
@@ -1245,13 +1720,14 @@ const Chat = (() => {
       pendingGeoData  = null;
     }
 
-    const priceMsg = _fill(_t('ai.price.announce', lang), {
-      from:  pendingOrigin,
-      to:    pendingDest,
-      price: pendingEstimate.price,
-    });
+    // Le prix/trajet vient exclusivement du moteur (Maps.resolve /
+    // MockData.getEstimate, inchangés) — le LLM ne fait que phraser la
+    // phrase autour de ces valeurs déjà vérifiées, jamais les recalculer.
+    const priceReply = await NLU.generateReply('price_announce', {
+      from: pendingOrigin, to: pendingDest, price: pendingEstimate.price,
+    }, lang, _buildNluContext(lang));
     const cardHtml = _buildTransportCard(pendingOrigin, pendingDest, pendingEstimate, lang, !!pendingGeoData, pendingPhone);
-    await _aiReply(priceMsg, lang, 400, cardHtml);
+    await _aiReply(priceReply.message, lang, 400, cardHtml);
 
     if (pendingGeoData) {
       const og = pendingGeoData.origin;
@@ -1269,7 +1745,8 @@ const Chat = (() => {
   async function _handleModify(lang) {
     state = STATE.AWAITING_MODIFY_CHOICE;
     Maps.destroyMap();
-    await _aiReply(_t('ai.modify.choice', lang), lang, 400);
+    const reply = await NLU.generateReply('modify_choice', {}, lang, _buildNluContext(lang));
+    await _aiReply(reply.message, lang, 400);
   }
 
   async function _handleConfirm(lang) {
@@ -1277,7 +1754,8 @@ const Chat = (() => {
     state = STATE.IDLE;
     Maps.destroyMap();
     Maps.hideSuggestions();
-    await _aiReply(_t('ai.confirmed', lang), lang, 500);
+    const reply = await NLU.generateReply('booking_confirmed', {}, lang, _buildNluContext(lang));
+    await _aiReply(reply.message, lang, 500);
     await Transport.createRequest(pendingOrigin, pendingDest, pendingPhone);
     Notifications.toast(_t('toast.req.created', lang), 'info');
     pendingOrigin   = null;
@@ -1302,7 +1780,8 @@ const Chat = (() => {
     _autoDest       = null;
     Maps.hideSuggestions();
     Maps.destroyMap();
-    await _aiReply(_t('ai.cancelled', lang), lang, 450);
+    const reply = await NLU.generateReply('flow_abandoned', {}, lang, _buildNluContext(lang));
+    await _aiReply(reply.message, lang, 450);
   }
 
   async function _doCancel(lang) {
@@ -1310,7 +1789,8 @@ const Chat = (() => {
     Transport.cancelRequest(pendingCancel.id);
     state = STATE.IDLE;
     pendingCancel = null;
-    await _aiReply(_t('ai.cancel.confirmed', lang), lang);
+    const reply = await NLU.generateReply('booking_cancelled', {}, lang, _buildNluContext(lang));
+    await _aiReply(reply.message, lang);
   }
 
   // ── Quick Action Chips ──────────────────────────────────────────
@@ -1325,12 +1805,19 @@ const Chat = (() => {
     if (text) processInput(text);
   }
 
-  // ── Render History view ─────────────────────────────────────────
-  function renderHistory() {
+  // ── Render History view — liste réelle des conversations de l'utilisateur
+  // connecté (voir /api/chat/sessions), pas les données de démonstration.
+  async function renderHistory() {
     const container = document.getElementById('history-container');
     if (!container) return;
-    const history = MockData.getHistory();
-    if (history.length === 0) {
+
+    let sessions = [];
+    try {
+      const resp = await Auth.authFetch('/api/chat/sessions');
+      if (resp.ok) sessions = (await resp.json()).data || [];
+    } catch (_) { /* hors ligne : liste vide, pas d'erreur bloquante */ }
+
+    if (sessions.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
           <svg width="140" height="150" viewBox="0 0 140 150" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 6px 20px rgba(14,165,233,.10))">
@@ -1366,49 +1853,121 @@ const Chat = (() => {
         </div>`;
       return;
     }
-    const sIcons = {
-      accepted:  `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
-      refused:   `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`,
-      cancelled: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`,
-      pending:   `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+    const statusIcons = {
+      active: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0EA5E9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>`,
+      closed: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
     };
-    const defaultIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0EA5E9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>`;
-    const lLabels = { fr:'FR', ar:'AR', ha:'HA' };
-    container.innerHTML = history.map(conv => {
-      const d = new Date(conv.date);
-      const ds = d.toLocaleDateString([],{day:'2-digit',month:'short'}) + ' · ' + d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const lLabels = { fr: 'FR', ar: 'AR', ha: 'HA' };
+    container.innerHTML = sessions.map(conv => {
+      const d  = new Date(conv.updatedAt || conv.createdAt);
+      const ds = d.toLocaleDateString([], { day: '2-digit', month: 'short' }) + ' · ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       return `
-      <div class="history-item" onclick="Chat.expandHistory('${conv.id}')">
-        <div class="history-icon">${sIcons[conv.status] || defaultIcon}</div>
-        <div class="history-body">
+      <div class="history-item" data-session-id="${conv.id}">
+        <div class="history-icon">${statusIcons[conv.status] || statusIcons.active}</div>
+        <div class="history-body" onclick="Chat.openConversation(${conv.id})" style="cursor:pointer;">
           <div class="history-meta">
-            <span class="history-lang">${lLabels[conv.lang] || 'FR'}</span>
+            <span class="history-lang">${lLabels[conv.language] || 'FR'}</span>
             <span class="history-date">${ds}</span>
           </div>
-          <div class="history-summary">${conv.summary}</div>
+          <div class="history-summary">${_escapeHtml(conv.title)}</div>
           <div class="history-turns">${conv.turns} ${I18n.t('history.turns')}</div>
         </div>
+        <button class="history-delete-btn" aria-label="Supprimer" title="Supprimer" onclick="event.stopPropagation(); Chat.confirmDeleteConversation(${conv.id})">
+          <i data-lucide="trash-2"></i>
+        </button>
       </div>`;
     }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
-  function expandHistory(id) {
-    const conv = MockData.getHistory().find(c => c.id === id);
-    if (!conv) return;
-    const bubbles = (conv.messages || []).map(m => {
-      const s = m.role === 'ai'
-        ? 'background:var(--surface);border:1px solid var(--border);color:var(--text);'
-        : 'background:var(--primary);color:white;';
-      const a = m.role === 'ai' ? 'flex-start' : 'flex-end';
-      return `<div style="display:flex;justify-content:${a};margin-bottom:8px;">
-        <div style="max-width:80%;padding:9px 13px;border-radius:16px;font-size:13px;${s}">${m.text}</div>
-      </div>`;
-    }).join('');
-    Modal.show({
-      title: conv.summary,
-      body: `<div style="max-height:50vh;overflow-y:auto;padding:4px 0;">${bubbles}</div>`,
-      actions: `<button class="modal-btn primary" style="flex:1" onclick="Modal.close()">${I18n.t('modal.close')}</button>`,
+  function _escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s || '';
+    return div.innerHTML;
+  }
+
+  // ── Nouvelle conversation : session vierge, aucun mélange avec l'ancienne ──
+  async function startNewConversation() {
+    resetState();
+    messages = [];
+    _currentSessionId = null;
+    const lang = I18n.getLang();
+    // Une nouvelle conversation ne doit pas hériter de la langue détectée
+    // dans la précédente (sinon la session est créée avec le mauvais tag
+    // de langue avant même le premier message de l'utilisateur).
+    _lastLang = lang;
+    const listEl = document.getElementById('messages');
+    if (listEl) listEl.innerHTML = '';
+    if (typeof App !== 'undefined') App.navigateTo('chat');
+    await _ensureSession();
+    await _aiReply(_t('ai.welcome', lang), lang, 300);
+  }
+
+  // ── Ouvrir une conversation existante : recharge son historique et permet
+  // de la continuer (nouveaux messages rattachés à cette même session).
+  // Simplification assumée : le fil de réservation en cours (précision,
+  // confirmation de prix...) n'est PAS restauré dans son état exact — la
+  // conversation reprend en IDLE, prête pour une nouvelle demande, avec
+  // l'historique complet visible au-dessus.
+  async function openConversation(sessionId) {
+    let msgs = [];
+    try {
+      const resp = await Auth.authFetch(`/api/chat/sessions/${sessionId}/messages`);
+      if (resp.ok) msgs = (await resp.json()).data || [];
+    } catch (_) {
+      return;
+    }
+
+    resetState();
+    messages = [];
+    _currentSessionId = sessionId;
+    const listEl = document.getElementById('messages');
+    if (listEl) listEl.innerHTML = '';
+
+    msgs.forEach(m => {
+      const time = m.created_at
+        ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : _nowTime();
+      const msg = { role: m.sender === 'ai' ? 'ai' : 'user', text: m.content, time };
+      messages.push(msg);
+      _renderMessage(msg);
     });
+
+    if (typeof App !== 'undefined') App.navigateTo('chat');
+  }
+
+  function confirmDeleteConversation(sessionId) {
+    const lang = I18n.getLang();
+    Modal.confirm({
+      title: { fr: 'Supprimer la conversation', ar: 'حذف المحادثة', ha: 'حذف المحادثة' }[lang],
+      body: `<p style="color:var(--text-2);font-size:14px;">${
+        { fr: 'Cette action est irréversible.', ar: 'لا يمكن التراجع عن هذا.', ha: 'هذا ما يرجعش.' }[lang]
+      }</p>`,
+      confirmLabel: I18n.t('lbl.clear'),
+      confirmClass: 'danger',
+      onConfirm: async () => {
+        try {
+          await Auth.authFetch(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' });
+        } catch (_) { /* best-effort */ }
+        if (_currentSessionId === sessionId) {
+          _currentSessionId = null;
+        }
+        renderHistory();
+      },
+    });
+  }
+
+  async function deleteAllConversations() {
+    let sessions = [];
+    try {
+      const resp = await Auth.authFetch('/api/chat/sessions');
+      if (resp.ok) sessions = (await resp.json()).data || [];
+    } catch (_) { return; }
+    await Promise.all(sessions.map(s =>
+      Auth.authFetch(`/api/chat/sessions/${s.id}`, { method: 'DELETE' }).catch(() => {})
+    ));
+    _currentSessionId = null;
+    renderHistory();
   }
 
   // ── Init ────────────────────────────────────────────────────────
@@ -1418,6 +1977,11 @@ const Chat = (() => {
       const lang = I18n.getLang();
       _aiReply(_t('ai.welcome', lang), lang, 500);
     }, 400);
+
+    // Fire-and-forget : bascule vers le provider LLM configuré (si
+    // aucun, reste sur "rules" déjà enregistré plus haut). Ne bloque
+    // jamais l'ouverture du chat.
+    _initNluProvider();
 
     const sendBtn   = document.getElementById('send-btn');
     const inputEl   = document.getElementById('chat-input');
@@ -1499,9 +2063,13 @@ const Chat = (() => {
     processInput,
     handleChip,
     addSystemMessage,
+    addSystemReply,
     addUserMessage,
     renderHistory,
-    expandHistory,
+    startNewConversation,
+    openConversation,
+    confirmDeleteConversation,
+    deleteAllConversations,
     resetState,
     cancelPending,
   };

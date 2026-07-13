@@ -853,19 +853,19 @@
 
     if (cat === 'llm') return `
       <p style="font-size:12.5px;color:var(--text3);margin:-4px 0 4px;">
-        Prépare la configuration du futur fournisseur LLM. Tant que le provider "Rules" est sélectionné, le chat continue d'utiliser le moteur actuel — rien ici n'est encore branché sur les réponses de l'IA.
+        Seul "Google Gemini" est aujourd'hui réellement branché : le sélectionner active de vrais appels vers l'API Gemini pour la compréhension du langage (le moteur de réservation, lui, reste toujours 100% géré par NaqlaBot). Les autres fournisseurs listés ci-dessous n'ont pas encore d'adaptateur côté serveur — les sélectionner fera échouer chaque appel et le chat retombera automatiquement sur "Rules".
       </p>
 
       <div class="sub-panel-section">
         <div class="sub-panel-section-label">Fournisseur</div>
         <select class="setting-input" id="llm-provider" onchange="document.getElementById('llm-provider-custom-wrap').style.display = this.value === 'autre' ? '' : 'none'">
           <option value="rules">Rules — moteur actuel (aucun appel externe)</option>
-          <option value="gemini">Google Gemini</option>
-          <option value="groq">Groq</option>
-          <option value="openrouter">OpenRouter</option>
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Anthropic (Claude)</option>
-          <option value="autre">Autre…</option>
+          <option value="gemini">Google Gemini (actif)</option>
+          <option value="groq">Groq (pas encore câblé)</option>
+          <option value="openrouter">OpenRouter (pas encore câblé)</option>
+          <option value="openai">OpenAI (pas encore câblé)</option>
+          <option value="anthropic">Anthropic — Claude (pas encore câblé)</option>
+          <option value="autre">Autre… (pas encore câblé)</option>
         </select>
       </div>
 
@@ -1080,8 +1080,11 @@
   // ── FOURNISSEUR LLM ───────────────────────────────────────────────
   // Table backend dédiée (voir /api/admin/llm-settings) — pas localStorage,
   // pour ne jamais exposer la clé API au navigateur (voir GET, qui ne
-  // renvoie qu'un booléen apiKeySet). Structure prête pour le futur
-  // provider LLM ; le moteur "rules" actuel n'en tient pas encore compte.
+  // renvoie qu'un booléen apiKeySet). "gemini" est le seul provider avec
+  // un adaptateur câblé côté serveur (backend/app/utils/llm_providers/) ;
+  // les autres noms sont acceptés par ce formulaire pour préparer leur
+  // ajout futur mais /api/nlu/analyze les rejette tant qu'aucun adaptateur
+  // n'existe pour eux (le chat retombe alors sur "rules" via le fallback).
   const _LLM_KNOWN_PROVIDERS = ['rules', 'gemini', 'groq', 'openrouter', 'openai', 'anthropic'];
 
   async function loadLlmSettings() {

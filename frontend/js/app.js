@@ -60,9 +60,8 @@ const App = (() => {
       }</p>`,
       confirmLabel: I18n.t('lbl.clear'),
       confirmClass: 'danger',
-      onConfirm: () => {
-        MockData.saveHistory([]);
-        Chat.renderHistory();
+      onConfirm: async () => {
+        await Chat.deleteAllConversations();
         Notifications.toast(
           { fr: 'Historique effacé', ar: 'تم مسح السجل', ha: 'السجل تحذف' }[I18n.getLang()],
           'info'
@@ -135,6 +134,10 @@ const App = (() => {
     // Clear history
     const clearBtn = document.getElementById('clear-history-btn');
     if (clearBtn) clearBtn.addEventListener('click', clearHistory);
+
+    // New conversation
+    const newChatBtn = document.getElementById('new-chat-btn');
+    if (newChatBtn) newChatBtn.addEventListener('click', () => Chat.startNewConversation());
 
     // Active request bar
     const reqBarBtn = document.getElementById('req-bar-btn');

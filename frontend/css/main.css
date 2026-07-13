@@ -579,6 +579,15 @@ svg    { display: block; flex-shrink: 0; }
 .history-date    { font-size: 11px; color: var(--text-4); font-weight: 500; }
 .history-summary { font-size: 13.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .history-turns   { font-size: 11px; color: var(--text-4); margin-top: 3px; font-weight: 500; }
+.history-delete-btn {
+  flex-shrink: 0; align-self: center;
+  width: 34px; height: 34px; border-radius: var(--r-sm);
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-4); transition: all var(--ease);
+}
+.history-delete-btn:hover { background: rgba(239,68,68,.10); color: #EF4444; }
+.history-delete-btn svg   { width: 16px; height: 16px; }
 
 /* ══════════════════════════════════════════
    NOTIFICATION PANEL — Glass effect

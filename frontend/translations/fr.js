@@ -153,6 +153,8 @@ window.LANG_FR = {
     'Je vais utiliser une position approximative : {place}.',
   'ai.match.confirm':
     'Voulez-vous dire : "{place}" ? (Oui/Non)',
+  'ai.match.choice':
+    'J\'ai trouvé plusieurs lieux :\n{list}\nLequel voulez-vous ? (répondez par le numéro)',
   'ai.match.declined':
     'D\'accord, pouvez-vous préciser autrement le lieu ?',
 

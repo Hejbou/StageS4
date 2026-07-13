@@ -22,6 +22,14 @@ const Chat = (() => {
     AWAITING_DEST_PRECISION: 'AWAITING_DEST_PRECISION',
     AWAITING_ORIGIN_MATCH_CONFIRM: 'AWAITING_ORIGIN_MATCH_CONFIRM',
     AWAITING_DEST_MATCH_CONFIRM:   'AWAITING_DEST_MATCH_CONFIRM',
+    // Plusieurs lieux réels correspondent (nom flou ou catégorie type
+    // "Carrefour") — l'utilisateur doit choisir un numéro (voir
+    // _askMatchChoice/_handleMatchChoiceAnswer). Distinct de MATCH_CONFIRM
+    // (oui/non sur UN candidat) : ici chaque chiffre sélectionne un
+    // candidat différent, un recyclage de MATCH_CONFIRM créerait une
+    // collision sémantique entre "non" et "choisir le n°2".
+    AWAITING_ORIGIN_MATCH_CHOICE:  'AWAITING_ORIGIN_MATCH_CHOICE',
+    AWAITING_DEST_MATCH_CHOICE:    'AWAITING_DEST_MATCH_CHOICE',
     AWAITING_CONFIRM:      'AWAITING_CONFIRM',
     AWAITING_MODIFY_CHOICE:'AWAITING_MODIFY_CHOICE',
     AWAITING_CANCEL_CONF:  'AWAITING_CANCEL_CONF',
@@ -44,6 +52,7 @@ const Chat = (() => {
   let _precisionTarget = null;   // 'origin' | 'dest' — quel point est en cours d'affinage
   let _autoDest        = null;   // destination extraite en même temps que l'origine dans un même message ("de X à Y") — validée automatiquement une fois l'origine résolue
   let _matchCandidate  = null;   // { target, place, lang, returnState } — correspondance approximative en attente de confirmation oui/non
+  let _matchChoices    = null;   // { target, candidates, lang, returnState } — plusieurs lieux réels en attente d'un choix par numéro
   let _lastLang        = 'fr';   // dernière langue détectée dans un message utilisateur (pas la langue de l'interface) — utilisée par les clics sur les cartes (confirmer/annuler), qui n'ont pas de texte à eux-mêmes détecter
   let _aiOfflineNotified = false; // évite de re-notifier à chaque message tant que l'IA reste indisponible (voir _tryAIReply)
   let messages       = [];
@@ -644,9 +653,9 @@ const Chat = (() => {
     }
 
     // UNKNOWN depuis IDLE : filet de sécurité Phase 1 — un texte qui
-    // correspond à un lieu connu (PoiDB) vaut comme début de réservation
+    // correspond à un lieu connu (LieuDB) vaut comme début de réservation
     // implicite plutôt qu'un abandon, même sans mot-clé de transport.
-    const poiHit = (typeof PoiDB !== 'undefined') ? PoiDB.search(text.trim()) : null;
+    const poiHit = (typeof LieuDB !== 'undefined') ? LieuDB.search(text.trim()) : null;
     if (poiHit && poiHit.found) {
       return { action: 'REQUEST_TRANSPORT', route: { origin: text.trim(), dest: null }, message: null };
     }
@@ -725,7 +734,7 @@ const Chat = (() => {
       lastMessage: messages.length ? _sanitizeMessageForNlu(messages[messages.length - 1]) : null,
       history: messages.slice(-20).map(_sanitizeMessageForNlu),
       proposedPlaces: _precisionExcluded.map(id => {
-        const p = PoiDB.getById(id);
+        const p = LieuDB.getById(id);
         return p ? _poiName(p, lang) : id;
       }),
     };
@@ -750,84 +759,36 @@ const Chat = (() => {
     return 'Centre-ville';
   }
 
-  // ── Validate a location text — 4-level chain ────────────────────
-  // Level 0 : PoiDB local (aliases, noms populaires mauritaniens)
-  // Level 1 : MockData.LOCATIONS (quartiers rapides)
-  // Level 2 : Backend Flask /api/maps/geocode
-  // Level 3 : Nominatim OpenStreetMap
-  // Returns { found: bool, formatted: string, lat, lng, suggestion, source }
+  // ── Validate a location text ────────────────────────────────────
+  // Returns { found, ambiguous, candidates?, formatted, lat, lng, suggestion, source }
+  // Seule source utilisée par le moteur pour comprendre/rechercher un lieu :
+  // la nouvelle base des Lieux (LieuDB, table `lieux`). Ni la carte, ni
+  // aucune source externe (Nominatim, geocoding backend) — voir LieuDB
+  // dans lieu-db.js pour le contrat de recherche complet (found /
+  // ambiguous / unknown). PoiDB (ancienne table `locations`) continue de
+  // servir uniquement l'autocomplétion de la carte (maps.js), jamais le
+  // moteur de conversation.
   async function _validateLocation(text, lang) {
     const raw = text.trim();
-    const low = raw.toLowerCase();
 
-    // ── 0. POI local database (lieux mauritaniens + aliases) ────────
-    if (typeof PoiDB !== 'undefined') {
-      const poi = PoiDB.search(raw);
-      if (poi.found) {
-        return {
-          found: true, formatted: poi.canonical, lat: poi.lat, lng: poi.lng, suggestion: null, source: 'poi',
-          type: poi.poi.type, quartier: poi.poi.quartier,
-          nameAr: poi.poi.nameAr, nameHa: poi.poi.nameHa,
-          matchType: poi.match, // 'exact' | 'alias' | 'fuzzy' — voir _isApproximateMatch
-        };
-      }
-      // Garder la suggestion POI même si non trouvé pour la proposer plus tard
-      if (!raw._poiSuggestion && poi.suggestion) raw._poiSuggestion = poi.suggestion;
+    const lieu = LieuDB.search(raw);
+
+    if (lieu.ambiguous) {
+      return { found: true, ambiguous: true, candidates: lieu.candidates, formatted: raw, source: 'lieu' };
     }
 
-    // ── 1. Mock locations list (quartiers de base) ──────────────────
-    const locs  = MockData.LOCATIONS;
-    const exact = locs.find(l => l.toLowerCase() === low || l === raw);
-    if (exact) return { found: true, formatted: exact, suggestion: null, source: 'mock' };
-    const fuzzy = locs.find(l => low.includes(l.toLowerCase()) || l.toLowerCase().includes(low) || raw.includes(l));
-    if (fuzzy) return { found: true, formatted: fuzzy, suggestion: null, source: 'mock' };
+    if (lieu.found) {
+      return {
+        found: true, ambiguous: false, formatted: lieu.canonical, lat: lieu.lat, lng: lieu.lng, suggestion: null, source: 'lieu',
+        type: lieu.poi.type, quartier: lieu.poi.quartier,
+        nameAr: lieu.poi.nameAr, nameHa: lieu.poi.nameHa,
+        matchType: lieu.match, // 'exact' | 'alias' | 'type' | 'fuzzy' — voir _isApproximateMatch
+      };
+    }
 
-    // ── 2. Backend Flask /api/maps/geocode ──────────────────────────
-    try {
-      const ctrl = new AbortController();
-      const tmo  = setTimeout(() => ctrl.abort(), 3000);
-      // NB: la route Flask attend le paramètre "address", pas "q".
-      const r    = await fetch(
-        `http://localhost:5000/api/maps/geocode?address=${encodeURIComponent(raw + ' Nouakchott')}&lang=${lang}`,
-        { signal: ctrl.signal }
-      );
-      clearTimeout(tmo);
-      if (r.ok) {
-        const d = await r.json();
-        if (d.data && d.data.lat) {
-          const name = (d.data.formatted_address || raw).split(',')[0].trim();
-          // Le fallback backend (sans clé Google Maps) ne connaît que les
-          // 18 zones de Nouakchott en entier — jamais un point précis.
-          return { found: true, formatted: name, lat: d.data.lat, lng: d.data.lng, suggestion: null, source: 'backend' };
-        }
-      }
-    } catch (_) { /* backend offline */ }
-
-    // ── 3. Nominatim OpenStreetMap — gratuit, sans clé ─────────────
-    try {
-      const nomLang = (lang === 'fr') ? 'fr' : 'ar';
-      const ctrl    = new AbortController();
-      const tmo     = setTimeout(() => ctrl.abort(), 4000);
-      const q       = encodeURIComponent(raw + ' Nouakchott Mauritanie');
-      const r       = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=3&countrycodes=mr&accept-language=${nomLang}`,
-        { headers: { 'User-Agent': 'ChatIA/1.0' }, signal: ctrl.signal }
-      );
-      clearTimeout(tmo);
-      const items = await r.json();
-      if (Array.isArray(items) && items.length > 0) {
-        const top  = items[0];
-        const name = top.display_name.split(',')[0].trim();
-        return {
-          found: true, formatted: name, lat: parseFloat(top.lat), lng: parseFloat(top.lon), suggestion: null, source: 'nominatim',
-          nomClass: top.class, nomType: top.type,
-        };
-      }
-    } catch (_) { /* nominatim offline */ }
-
-    // ── 4. Non trouvé — suggestion via POI ou heuristique ──────────
-    const suggestion = (typeof PoiDB !== 'undefined' ? PoiDB.suggest(raw) : null) || _suggestLocation(raw);
-    return { found: false, formatted: raw, suggestion, source: null };
+    // Non trouvé — suggestion via LieuDB ou heuristique générique.
+    const suggestion = lieu.suggestion || _suggestLocation(raw);
+    return { found: false, ambiguous: false, formatted: raw, suggestion, source: null };
   }
 
   // ── Localisation intelligente ────────────────────────────────────
@@ -837,29 +798,20 @@ const Chat = (() => {
   // (clinique, mosquée, école, station, commerce) jusqu'à obtenir un
   // point précis, quitte à poser jusqu'à 3-5 questions courtes.
   function _isVagueLocation(loc) {
-    if (loc.source === 'poi') return loc.type === 'quartier';
-    if (loc.source === 'mock') return true;
-    // Fallback backend (sans clé Google Maps) : ne résout que les 18 zones
-    // de Nouakchott en entier, jamais un point précis — toujours vague.
-    if (loc.source === 'backend') return true;
-    // Nominatim classe ses résultats : class="place"/"boundary" couvre les
-    // zones administratives (quartier, ville, région...) — vague. Tout le
-    // reste (amenity, shop, tourism, building nommé...) est un point précis.
-    if (loc.source === 'nominatim') return loc.nomClass === 'place' || loc.nomClass === 'boundary';
+    if (loc.ambiguous) return false; // traité avant ce point, voir _handleOriginText/_handleDestText
+    if (loc.source === 'lieu') return loc.type === 'quartier';
     return false;
   }
 
   // ── Confirmation obligatoire des correspondances approximatives ─────
   // Une correspondance n'est "sûre" que si elle vient d'un nom ou alias
-  // EXACT du catalogue. Tout le reste — score flou (trigrammes) sur PoiDB,
-  // ou résolution externe via Nominatim (recherche plein texte, jamais
-  // garantie de correspondre exactement à ce que l'utilisateur a tapé) —
-  // est une supposition qui doit être confirmée avant d'être enregistrée
-  // comme départ ou destination. ('mock'/'backend' passent déjà toujours
-  // par _isVagueLocation ci-dessus, donc n'atteignent jamais ce point.)
+  // EXACT de la base des Lieux. Un score flou (trigrammes) ou un lieu
+  // deviné par catégorie ("type") est une supposition qui doit être
+  // confirmée avant d'être enregistrée comme départ ou destination.
   function _isApproximateMatch(loc) {
-    if (loc.source === 'poi') return loc.matchType === 'fuzzy';
-    if (loc.source === 'nominatim') return true;
+    // Un match "type" (catégorie nommée sans précision, ex: "hôpital" quand
+    // un seul existe) n'est pas plus sûr qu'un score flou — confirmation requise.
+    if (loc.source === 'lieu') return loc.matchType === 'fuzzy' || loc.matchType === 'type';
     return false;
   }
 
@@ -869,6 +821,17 @@ const Chat = (() => {
 
   function _landmarksList(landmarks, lang) {
     return landmarks.map(p => `• ${_poiName(p, lang)}`).join('\n');
+  }
+
+  // Liste numérotée pour la désambiguïsation entre plusieurs lieux réels
+  // (ex: "1- Carrefour Madrid, Arafat\n2- Carrefour Tevragh Zeina") —
+  // distincte de _landmarksList (puces, pas de choix par numéro).
+  function _candidatesList(candidates, lang) {
+    return candidates.map((c, i) => {
+      const name = _poiName(c.poi, lang);
+      const group = c.poi.moughataaName ? `, ${c.poi.moughataaName}` : '';
+      return `${i + 1}- ${name}${group}`;
+    }).join('\n');
   }
 
   // Recherche de proximité réelle (100-500m) quand on connaît les
@@ -882,11 +845,11 @@ const Chat = (() => {
       && typeof _precisionZone.lat === 'number' && typeof _precisionZone.lng === 'number';
 
     let landmarks = hasCoords
-      ? PoiDB.nearbyByRadius(_precisionZone.lat, _precisionZone.lng, { exclude: _precisionExcluded, limit: 3, type: typeHint || null })
+      ? LieuDB.nearbyByRadius(_precisionZone.lat, _precisionZone.lng, { exclude: _precisionExcluded, limit: 3, type: typeHint || null })
       : [];
 
     if (!landmarks.length) {
-      landmarks = PoiDB.nearbyLandmarks(_precisionZone ? _precisionZone.quartier : null, { exclude: _precisionExcluded, limit: 3, type: typeHint || null });
+      landmarks = LieuDB.nearbyLandmarks(_precisionZone ? _precisionZone.quartier : null, { exclude: _precisionExcluded, limit: 3, type: typeHint || null });
     }
 
     landmarks.forEach(p => _precisionExcluded.push(p.id));
@@ -937,7 +900,7 @@ const Chat = (() => {
   // relationnelles) et devine une catégorie si aucune instance précise
   // n'est nommée. Ne fait JAMAIS de recherche/validation de lieu elle-
   // même — { cleaned, typeHint } seulement. C'est _handlePrecisionAnswer
-  // (le moteur) qui interroge PoiDB avec ce texte, exactement comme il
+  // (le moteur) qui interroge LieuDB avec ce texte, exactement comme il
   // le fait déjà pour l'origine et la destination — le même contrat vaut
   // pour un futur provider LLM (voir nlu.js).
   function _interpretLocationAnswer(text, lang, _context) {
@@ -945,16 +908,19 @@ const Chat = (() => {
     return { cleaned, typeHint: _detectTypeHint(text) };
   }
 
-  // Recherche PoiDB pour une réponse de précision : essaie le texte
+  // Recherche LieuDB pour une réponse de précision : essaie le texte
   // nettoyé (prépositions retirées) puis, si différent, le texte brut
   // (au cas où la préposition faisait partie d'un alias). Toujours
   // appelé par le moteur après NLU.interpretLocationAnswer, jamais par
   // le provider lui-même.
   function _matchPrecisionAnswer(cleaned, text) {
-    const match = PoiDB.search(cleaned);
+    // Un résultat ambigu (found:false) n'est pas assez sûr pour affiner
+    // silencieusement — retombe sur "non reconnu, réessayer" ci-dessous
+    // plutôt que d'ouvrir un second point d'entrée de désambiguïsation.
+    const match = LieuDB.search(cleaned);
     if (match.found && match.poi && match.poi.type !== 'quartier') return match;
     if (cleaned !== text) {
-      const rawMatch = PoiDB.search(text);
+      const rawMatch = LieuDB.search(text);
       if (rawMatch.found && rawMatch.poi && rawMatch.poi.type !== 'quartier') return rawMatch;
     }
     return null;
@@ -963,12 +929,12 @@ const Chat = (() => {
   // target: 'origin' | 'dest' — la même logique d'affinage sert aux deux points.
   async function _startPrecisionFlow(loc, lang, target) {
     // Le nom du quartier doit lui aussi s'afficher dans la langue détectée
-    // (loc.formatted est toujours le nom canonique français depuis PoiDB).
+    // (loc.formatted est toujours le nom canonique français depuis LieuDB).
     const zoneLabel = (lang === 'ar' ? loc.nameAr : lang === 'ha' ? loc.nameHa : loc.formatted) || loc.formatted;
 
-    // lat/lng présents pour les sources 'poi' | 'backend' | 'nominatim' —
-    // absents pour 'mock' ou un texte jamais résolu ; _nextLandmarks se
-    // rabat alors sur le regroupement par quartier (voir plus haut).
+    // lat/lng présents quand LieuDB a trouvé un lieu — absents pour un
+    // texte jamais résolu ; _nextLandmarks se rabat alors sur le
+    // regroupement par quartier (voir plus haut).
     _precisionZone     = {
       quartier: loc.quartier || null, label: zoneLabel,
       lat: typeof loc.lat === 'number' ? loc.lat : null,
@@ -1013,7 +979,7 @@ const Chat = (() => {
       // Limite atteinte : on retient le dernier repère proposé comme
       // position approximative plutôt que de boucler indéfiniment.
       const fallbackId = _precisionExcluded[0];
-      const fallback    = fallbackId ? PoiDB.getById(fallbackId) : null;
+      const fallback    = fallbackId ? LieuDB.getById(fallbackId) : null;
       const place = fallback ? _poiName(fallback, lang) : (_precisionZone ? _precisionZone.label : text.trim());
       const giveupReply = await NLU.generateReply('giveup', { place }, lang, _buildNluContext(lang));
       await _aiReply(giveupReply.message, lang, 400);
@@ -1042,7 +1008,7 @@ const Chat = (() => {
   function _syncExcludedFromReply(reply) {
     if (!reply || !Array.isArray(reply.nearbyPlaces)) return;
     reply.nearbyPlaces.forEach(p => {
-      const found = PoiDB.search(p.name);
+      const found = LieuDB.search(p.name);
       if (found && found.found && found.poi && !_precisionExcluded.includes(found.poi.id)) {
         _precisionExcluded.push(found.poi.id);
       }
@@ -1051,7 +1017,7 @@ const Chat = (() => {
 
   function _excludedNames(lang) {
     return _precisionExcluded
-      .map(id => { const p = PoiDB.getById(id); return p ? _poiName(p, lang) : null; })
+      .map(id => { const p = LieuDB.getById(id); return p ? _poiName(p, lang) : null; })
       .filter(Boolean);
   }
 
@@ -1138,6 +1104,8 @@ const Chat = (() => {
         return { message: _t('ai.status.pending', lang) };
       case 'match_confirm_ask':
         return { message: _fill(_t('ai.match.confirm', lang), { place: data.place }) };
+      case 'match_choice_ask':
+        return { message: _fill(_t('ai.match.choice', lang), { list: data.list }) };
 
       default:
         return { message: _t('ai.precision.not.matched', lang) };
@@ -1198,8 +1166,8 @@ const Chat = (() => {
   }
 
   // ── Confirmation obligatoire des correspondances approximatives ─────
-  // Déclenchée quand une correspondance n'est PAS un nom/alias exact du
-  // catalogue (score flou PoiDB, ou résolution Nominatim) : on ne
+  // Déclenchée quand une correspondance n'est PAS un nom/alias exact de la
+  // base des Lieux (score flou, ou catégorie type devinée) : on ne
   // l'enregistre jamais comme départ/destination sans que l'utilisateur
   // confirme explicitement — voir _isApproximateMatch.
   async function _askMatchConfirm(target, place, lang, returnState) {
@@ -1259,6 +1227,57 @@ const Chat = (() => {
     }
   }
 
+  // ── Désambiguïsation entre plusieurs lieux réels ("Carrefour" -> 2+
+  // lieux de type carrefour, ou un nom flou qui matche plusieurs lieux à
+  // égalité) — distinct de _askMatchConfirm (oui/non sur UN candidat) :
+  // ici chaque chiffre sélectionne un candidat différent.
+  async function _askMatchChoice(target, candidates, lang, returnState) {
+    _matchChoices = { target, candidates, lang, returnState };
+    state = target === 'dest' ? STATE.AWAITING_DEST_MATCH_CHOICE : STATE.AWAITING_ORIGIN_MATCH_CHOICE;
+    const list = _candidatesList(candidates, lang);
+    const askReply = await NLU.generateReply('match_choice_ask', { list }, lang, _buildNluContext(lang));
+    await _aiReply(askReply.message, lang, 300);
+  }
+
+  async function _handleMatchChoiceAnswer(text, lang, intent) {
+    const choice = _matchChoices;
+    _matchChoices = null;
+    if (!choice) return; // garde-fou : ne devrait jamais arriver
+
+    const isPrecisionReturn = choice.returnState === STATE.AWAITING_ORIGIN_PRECISION
+      || choice.returnState === STATE.AWAITING_DEST_PRECISION;
+
+    if (intent === 'CANCEL') {
+      state = choice.returnState;
+      const declinedReply = await NLU.generateReply('match_declined', {}, lang, _buildNluContext(lang));
+      await _aiReply(declinedReply.message, lang, 300);
+      return;
+    }
+
+    const n = parseInt(text.trim(), 10);
+    if (Number.isInteger(n) && n >= 1 && n <= choice.candidates.length) {
+      const picked = choice.candidates[n - 1];
+      const place  = _poiName(picked.poi, lang);
+      if (isPrecisionReturn) {
+        const confirmReply = await NLU.generateReply('confirmed', { place }, lang, _buildNluContext(lang));
+        await _aiReply(confirmReply.message, lang, 300);
+      }
+      await _finalizePrecisePlace(choice.target, place, lang);
+      return;
+    }
+
+    // Ni un numéro valide ni une annulation : l'utilisateur a retapé/corrigé
+    // le lieu directement — on retraite ce nouveau texte à sa place.
+    state = choice.returnState;
+    if (isPrecisionReturn) {
+      await _handlePrecisionAnswer(text, lang);
+    } else if (choice.target === 'dest') {
+      await _handleDestText(text, lang);
+    } else {
+      await _handleOriginText(text, lang);
+    }
+  }
+
   // ── Traitement du texte d'origine — partagé entre l'état AWAITING_ORIGIN
   // et l'extraction combinée depuis REQUEST_TRANSPORT ("de X à Y" en un
   // seul message). Ne suppose pas que `state` vaut déjà AWAITING_ORIGIN.
@@ -1286,6 +1305,13 @@ const Chat = (() => {
       return;
     }
     _originRetries = 0;
+
+    // Plusieurs lieux réels correspondent (nom flou ou catégorie type
+    // "Carrefour") — laisser l'utilisateur choisir plutôt que deviner.
+    if (locO.ambiguous) {
+      await _askMatchChoice('origin', locO.candidates, lang, STATE.AWAITING_ORIGIN);
+      return;
+    }
 
     // ── Localisation intelligente : un simple quartier n'est pas assez précis.
     // Un texte jamais résolu (même après les 2 relances) n'est pas plus
@@ -1320,6 +1346,11 @@ const Chat = (() => {
       return;
     }
     _destRetries = 0;
+
+    if (locD.ambiguous) {
+      await _askMatchChoice('dest', locD.candidates, lang, STATE.AWAITING_DEST);
+      return;
+    }
 
     // ── Localisation intelligente : idem pour la destination (voir la
     // même logique côté origine juste au-dessus) ─────────────────────
@@ -1396,7 +1427,7 @@ const Chat = (() => {
   // mener, plutôt que la façade detectIntent() figée d'avant. Le moteur
   // reste seul à exécuter la logique métier : toute extraction de lieu
   // repart en texte brut vers _handleOriginText/_handleDestText,
-  // EXACTEMENT comme avant (validation PoiDB, zone vague -> précision,
+  // EXACTEMENT comme avant (validation LieuDB, zone vague -> précision,
   // correspondance approximative -> confirmation, prix, réservation —
   // rien de tout cela ne change). "message" (LLM) n'est utilisé que pour
   // l'accueil, la demande initiale d'origine et la clarification —
@@ -1416,6 +1447,7 @@ const Chat = (() => {
         _resetPrecision();
         _autoDest = null;
         _matchCandidate = null;
+        _matchChoices = null;
         state = STATE.IDLE;
       }
       await _runGlobalAction(action, lang);
@@ -1610,6 +1642,7 @@ const Chat = (() => {
         _resetPrecision();
         _autoDest = null;
         _matchCandidate = null;
+        _matchChoices = null;
         state = STATE.IDLE;
       }
       // Fall through to the switch statement (no return here)
@@ -1627,6 +1660,11 @@ const Chat = (() => {
 
     if (state === STATE.AWAITING_ORIGIN_MATCH_CONFIRM || state === STATE.AWAITING_DEST_MATCH_CONFIRM) {
       await _handleMatchConfirmAnswer(text.trim(), lang, intent);
+      return;
+    }
+
+    if (state === STATE.AWAITING_ORIGIN_MATCH_CHOICE || state === STATE.AWAITING_DEST_MATCH_CHOICE) {
+      await _handleMatchChoiceAnswer(text.trim(), lang, intent);
       return;
     }
 
@@ -1770,11 +1808,11 @@ const Chat = (() => {
         // seul, en tout premier message) — un client qui ouvre la
         // conversation avec un simple nom d'endroit indique presque
         // toujours son point de départ, pas un sujet hors transport.
-        // Vérification volontairement locale et synchrone (PoiDB.search,
+        // Vérification volontairement locale et synchrone (LieuDB.search,
         // pas de recherche réseau) pour ne jamais ralentir un message
         // réellement hors-sujet en tentant de le géocoder pour rien.
         const active  = Transport.getActive();
-        const poiHit  = (typeof PoiDB !== 'undefined') ? PoiDB.search(text.trim()) : null;
+        const poiHit  = (typeof LieuDB !== 'undefined') ? LieuDB.search(text.trim()) : null;
         if (poiHit && poiHit.found && !(active && active.status === 'pending')) {
           state = STATE.AWAITING_ORIGIN;
           await _handleOriginText(text.trim(), lang);

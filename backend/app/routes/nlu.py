@@ -22,7 +22,7 @@ from ..models import LlmSettings
 from ..models.llm_settings import SUPPORTED_LANGUAGES
 from ..utils import ok, error
 from ..utils.intents import KNOWN_INTENTS
-from ..utils.location_search import find_location_context
+from ..utils.lieu_search import find_lieu_context
 from ..utils.llm_providers import (
     get_adapter, LlmTimeoutError, LlmQuotaError, LlmApiError, LlmInvalidResponseError,
 )
@@ -288,6 +288,7 @@ _REPLY_SITUATIONS = (
     "booking_confirmed", "price_announce", "retry_origin", "retry_dest", "ask_destination",
     "global_no_active", "global_active_trip", "global_help", "global_history",
     "global_map", "driver_found", "no_driver", "status_pending", "match_confirm_ask",
+    "match_choice_ask",
 )
 
 _REPLY_SYSTEM_PROMPT = """Tu aides un chatbot de réservation de transport à Nouakchott, Mauritanie, à formuler UNE SEULE réponse courte et naturelle à l'utilisateur, dans sa langue — jamais de logique métier, jamais de calcul, jamais de recherche : toutes les valeurs (lieux, prix, chauffeur...) te sont données déjà vérifiées, tu dois les utiliser EXACTEMENT telles quelles dans ta phrase, sans jamais en inventer, en modifier ou en omettre une.
@@ -321,6 +322,7 @@ Selon la situation donnée :
 - "no_driver" : aucun chauffeur n'est disponible pour l'instant — informe-en l'utilisateur avec bienveillance, sans donner de fausse date/heure.
 - "status_pending" : une réservation est déjà en cours de recherche de chauffeur — informe l'utilisateur qu'il faut patienter, sans proposer d'en commencer une nouvelle.
 - "match_confirm_ask" : le lieu donné ressemble à un lieu connu ("place") mais sans certitude totale — demande une confirmation simple (oui/non), en citant exactement ce nom.
+- "match_choice_ask" : plusieurs lieux réels correspondent à ce que l'utilisateur a dit — présente la liste numérotée fournie ("list") EXACTEMENT telle quelle (même ordre, mêmes noms, jamais reformulée ou renumérotée) et demande de choisir un numéro.
 
 Ne mentionne, n'invente et ne suppose JAMAIS une donnée qui ne t'a pas été fournie explicitement (prix, nom de chauffeur, heure, statut...)."""
 
@@ -396,7 +398,7 @@ def reply():
     location_ctx = None
     if situation in ("zone_detected", "ask_landmarks"):
         search_text = location_text or place
-        location_ctx = find_location_context(search_text, lang=lang, exclude_names=exclude_names) if search_text else None
+        location_ctx = find_lieu_context(search_text, lang=lang, exclude_names=exclude_names) if search_text else None
 
     system_prompt = _build_reply_system_prompt(settings)
     user_prompt = _build_reply_user_prompt(situation, lang, location_ctx, place, extra)

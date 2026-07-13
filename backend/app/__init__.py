@@ -37,6 +37,7 @@ def create_app(config_class=Config):
     from .routes.notifications import notif_bp
     from .routes.admin         import admin_bp
     from .routes.locations     import locations_bp
+    from .routes.lieux_public  import lieux_bp
     from .routes.llm_settings  import llm_settings_bp
     from .routes.nlu           import nlu_bp
     from .routes.ai_chat       import ai_chat_bp
@@ -49,6 +50,7 @@ def create_app(config_class=Config):
     app.register_blueprint(notif_bp,  url_prefix="/api/notifications")
     app.register_blueprint(admin_bp,  url_prefix="/api/admin")
     app.register_blueprint(locations_bp, url_prefix="/api/locations")
+    app.register_blueprint(lieux_bp,     url_prefix="/api/lieux")
     app.register_blueprint(llm_settings_bp, url_prefix="/api/admin/llm-settings")
     app.register_blueprint(nlu_bp, url_prefix="/api/nlu")
     # Nouvelle route indépendante POST /api/chat/ai (voir routes/ai_chat.py) —
